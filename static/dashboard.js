@@ -1,0 +1,1426 @@
+/* dashboard.js — DB Health Monitor */
+
+let REFRESH_MS = 10000;
+let countdown = 10;
+let currentDatasourceId = null;
+let datasources = [];
+let fileTypeDefs = [];
+let selectedFileTypes = [];
+let countdownTimer = null;
+let pollTimer = null;
+let activeTab = 'overview';
+let currentUserRole = 'viewer';
+let currentUsername = '';
+let _lastAlerts = [];
+let _lastSummaryMap = {};
+let _lastMetricsMap = {};
+
+const history = {
+  labels: [],
+  conn: [],
+  cache: [],
+  cpu: [],
+  mem: [],
+};
+
+const MAX_POINTS = 30;
+const CHART_COLOR = {
+  conn: '#4a9eff',
+  cache: '#a855f7',
+  cpu: '#f59e0b',
+  mem: '#10b981',
+};
+
+function $(id) { return document.getElementById(id); }
+
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
+}
+
+function fmtNum(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '–';
+  return Number(value).toLocaleString('es-MX');
+}
+
+function fmtPct(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '–';
+  return `${Number(value).toFixed(1)}%`;
+}
+
+
+function fmtSizeMB(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '–';
+  const mb = Number(value);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${mb.toFixed(2)} MB`;
+}
+
+function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return '–';
+  const s = Math.max(0, Number(seconds));
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  return `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
+}
+
+function statusClass(status) {
+  if (!status) return 'pill-unk';
+  const s = status.toUpperCase();
+  if (s === 'OK' || s === 'ONLINE') return 'pill-ok';
+  if (s === 'WARNING') return 'pill-warn';
+  if (s === 'CRITICAL' || s === 'ERROR') return 'pill-crit';
+  if (s === 'INFO') return 'pill-info';
+  return 'pill-unk';
+}
+
+const PAGE_TITLES = {
+  overview: 'Resumen',
+  sources: 'Fuentes de datos',
+  files: 'Archivos',
+  status: 'Estado',
+  alerts: 'Alertas',
+  admin: 'Administración',
+  integrations: 'Integraciones',
+};
+
+function setBar(id, value) {
+  const el = $(id);
+  if (!el) return;
+  const pct = Math.max(0, Math.min(100, Number(value) || 0));
+  el.style.width = `${pct}%`;
+}
+
+function getSelectedFileTypesKey() {
+  const ds = datasources.find(d => String(d.id) === String(currentDatasourceId));
+  return `selected-file-types:${ds?.tipo_db || 'global'}`;
+}
+
+function loadStoredFileTypes() {
+  try {
+    const raw = localStorage.getItem(getSelectedFileTypesKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredFileTypes(types) {
+  try {
+    localStorage.setItem(getSelectedFileTypesKey(), JSON.stringify(types));
+  } catch {
+    // ignore
+  }
+}
+
+function initCharts() {
+  const common = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+    scales: {
+      x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+      y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+    },
+  };
+
+  const connCtx = $('chart-conn');
+  const cacheCtx = $('chart-cache');
+  const sysCtx = $('chart-sys');
+
+  window.connChart = connCtx ? new Chart(connCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'Conexiones', data: [], borderColor: CHART_COLOR.conn, backgroundColor: 'rgba(74,158,255,0.12)', fill: true, tension: 0.35, pointRadius: 1 }] },
+    options: common,
+  }) : null;
+
+  window.cacheChart = cacheCtx ? new Chart(cacheCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'Cache Hit %', data: [], borderColor: CHART_COLOR.cache, backgroundColor: 'rgba(168,85,247,0.12)', fill: true, tension: 0.35, pointRadius: 1 }] },
+    options: { ...common, scales: { ...common.scales, y: { ...common.scales.y, max: 100 } } },
+  }) : null;
+
+  window.sysChart = sysCtx ? new Chart(sysCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'CPU %', data: [], borderColor: CHART_COLOR.cpu, backgroundColor: 'rgba(245,158,11,0.12)', fill: false, tension: 0.35, pointRadius: 1 },
+        { label: 'RAM %', data: [], borderColor: CHART_COLOR.mem, backgroundColor: 'rgba(16,185,129,0.12)', fill: false, tension: 0.35, pointRadius: 1 },
+      ],
+    },
+    options: { ...common, scales: { ...common.scales, y: { ...common.scales.y, max: 100 } } },
+  }) : null;
+}
+
+function pushPoint(label, conn, cache, cpu, mem) {
+  history.labels.push(label);
+  history.conn.push(conn);
+  history.cache.push(cache);
+  history.cpu.push(cpu);
+  history.mem.push(mem);
+  if (history.labels.length > MAX_POINTS) {
+    history.labels.shift();
+    history.conn.shift();
+    history.cache.shift();
+    history.cpu.shift();
+    history.mem.shift();
+  }
+  if (window.connChart) {
+    window.connChart.data.labels = history.labels;
+    window.connChart.data.datasets[0].data = history.conn;
+    window.connChart.update('none');
+  }
+  if (window.cacheChart) {
+    window.cacheChart.data.labels = history.labels;
+    window.cacheChart.data.datasets[0].data = history.cache;
+    window.cacheChart.update('none');
+  }
+  if (window.sysChart) {
+    window.sysChart.data.labels = history.labels;
+    window.sysChart.data.datasets[0].data = history.cpu;
+    window.sysChart.data.datasets[1].data = history.mem;
+    window.sysChart.update('none');
+  }
+}
+
+async function apiFetch(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  if (response.status === 401) {
+    showLogin(true);
+    throw new Error('unauthorized');
+  }
+  return response;
+}
+
+function showLogin(show) {
+  $('login-screen')?.classList.toggle('hidden', !show);
+  $('app-shell')?.classList.toggle('hidden', show);
+}
+
+function showAuthMode(mode) {
+  const loginForm = $('login-form');
+  const registerForm = $('register-form');
+  const loginBtn = $('mode-login');
+  const registerBtn = $('mode-register');
+  const isRegister = mode === 'register';
+  loginForm?.classList.toggle('hidden', isRegister);
+  registerForm?.classList.toggle('hidden', !isRegister);
+  loginBtn?.classList.toggle('active', !isRegister);
+  registerBtn?.classList.toggle('active', isRegister);
+}
+
+function applyRoleVisibility(role) {
+  currentUserRole = role || 'viewer';
+  const adminControls = document.querySelectorAll('.admin-only');
+  adminControls.forEach(el => {
+    el.classList.toggle('hidden', currentUserRole !== 'admin');
+  });
+  if (currentUserRole !== 'admin' && activeTab === 'admin') {
+    setActiveTab('overview');
+  }
+}
+
+function applySessionInfo(username, role) {
+  currentUsername = username || '';
+  applyRoleVisibility(role || 'viewer');
+  // Topbar profile
+  const initials = currentUsername ? currentUsername.slice(0, 2).toUpperCase() : '–';
+  const avatarEl = $('topbar-avatar');
+  const userEl = $('topbar-user');
+  const roleEl = $('topbar-role');
+  const dropdownInfo = $('dropdown-user-info');
+  const sidebarVer = $('sidebar-version');
+  if (avatarEl) avatarEl.textContent = initials;
+  if (userEl) userEl.textContent = currentUsername || '–';
+  if (roleEl) roleEl.textContent = currentUserRole || 'viewer';
+  if (dropdownInfo) dropdownInfo.textContent = `@${currentUsername} · ${currentUserRole}`;
+  document.title = currentUsername ? `DB Health Monitor · ${currentUsername}` : 'DB Health Monitor';
+}
+
+function loadStoredTab() {
+  try {
+    return localStorage.getItem('dashboard-active-tab') || 'overview';
+  } catch {
+    return 'overview';
+  }
+}
+
+function saveStoredTab(tab) {
+  try {
+    localStorage.setItem('dashboard-active-tab', tab);
+  } catch {
+    // ignore
+  }
+}
+
+function setActiveTab(tab) {
+  if (tab === 'admin' && currentUserRole !== 'admin') tab = 'overview';
+  activeTab = tab;
+
+  // Sidebar nav items
+  document.querySelectorAll('.nav-item[data-panel]').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-panel') === tab);
+  });
+
+  // Tab panels (new id-based)
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    const isActive = panel.id === `panel-${tab}`;
+    panel.classList.toggle('active', isActive);
+    panel.style.display = isActive ? '' : 'none';
+  });
+
+  // Page title
+  const titleEl = $('page-title');
+  if (titleEl) titleEl.textContent = PAGE_TITLES[tab] || tab;
+
+  saveStoredTab(tab);
+
+  // Load integrations data when switching to that panel
+  if (tab === 'integrations') {
+    loadApiKeys();
+    loadSkills();
+  }
+  if (tab === 'admin') loadAdminOverview();
+}
+
+function setGlobalStatus(status) {
+  const el = $('global-status');
+  if (!el) return;
+  el.textContent = status || '–';
+  const cls = status === 'OK' ? 'badge-ok' : status === 'WARNING' ? 'badge-warn' : status === 'CRITICAL' ? 'badge-crit' : 'badge-info';
+  el.className = `status-badge ${cls}`;
+  // Conn dot
+  const dot = $('conn-dot');
+  if (dot) dot.className = `conn-dot ${status === 'OK' ? 'dot-ok' : status === 'CRITICAL' ? 'dot-err' : 'dot-warn'}`;
+}
+
+function renderDatasourceSelect() {
+  const select = $('db-select');
+  if (!select) return;
+  const current = currentDatasourceId;
+  select.innerHTML = '';
+
+  if (!datasources.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Sin fuentes de datos';
+    select.appendChild(opt);
+    select.disabled = true;
+    currentDatasourceId = null;
+    return;
+  }
+  select.disabled = false;
+
+  datasources.forEach(ds => {
+    const opt = document.createElement('option');
+    opt.value = ds.id;
+    const ownerLabel = currentUserRole === 'admin' && ds.owner_username ? ` - ${ds.owner_username}` : '';
+    opt.textContent = `${ds.nombre} (${ds.tipo_db})${ownerLabel}`;
+    if (!ds.activa) opt.textContent += ' ⏸';
+    select.appendChild(opt);
+  });
+
+  if (!current && datasources.length) {
+    currentDatasourceId = datasources[0].id;
+  } else if (current) {
+    currentDatasourceId = current;
+  }
+
+  select.value = String(currentDatasourceId || '');
+}
+
+function renderDatasourceTable() {
+  const tbody = $('datasource-body');
+  if (!tbody) return;
+  if (!datasources.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">Todavía no has creado fuentes de datos</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = datasources.map(ds => {
+    let statusClassStr = 'pill-unk';
+    let statusLabel = 'Desconocido';
+    if (!ds.activa) {
+      statusClassStr = 'pill-unk';
+      statusLabel = 'Inactiva';
+    } else if (ds.status === 'OK' || ds.status === 'online') {
+      statusClassStr = 'pill-ok';
+      statusLabel = 'En línea';
+    } else if (ds.status === 'WARNING') {
+      statusClassStr = 'pill-warn';
+      statusLabel = 'Advertencia';
+    } else if (ds.status === 'CRITICAL' || ds.status === 'error' || ds.status === 'disabled') {
+      statusClassStr = 'pill-crit';
+      statusLabel = 'Error';
+    }
+
+    return `
+      <tr>
+        <td><strong>${ds.nombre}</strong></td>
+        <td>${ds.tipo_db}</td>
+        <td style="font-family:'JetBrains Mono', monospace">${ds.host}:${ds.puerto}</td>
+        <td>${ds.database}</td>
+        <td><span class="pill ${statusClassStr}">${statusLabel}</span></td>
+        <td>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="btn btn-secondary btn-sm" data-test-ds="${ds.id}">Probar</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="editDatasource(${ds.id})">Editar</button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="deleteDatasource(${ds.id})">Borrar</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('[data-test-ds]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const dsId = btn.getAttribute('data-test-ds');
+      const detailEl = $('datasource-test-detail');
+      if (detailEl) {
+        detailEl.innerHTML = 'Probando conexión... <span class="spinner"></span>';
+      }
+      try {
+        const response = await apiFetch(`/api/datasources/${dsId}/test`, { method: 'POST' });
+        const data = await response.json();
+        btn.textContent = data.ok ? `${data.latency_ms} ms` : 'Error';
+        btn.className = `btn-sm ${data.ok ? 'btn-success' : 'btn-error'}`;
+        
+        if (detailEl) {
+          if (data.ok) {
+            detailEl.innerHTML = `✅ Conexión exitosa a <strong>${data.datasource?.nombre || 'la base de datos'}</strong>. Latencia: <strong>${data.latency_ms} ms</strong>.`;
+          } else {
+            detailEl.innerHTML = `❌ Error de conexión: <code style="color: #f87171; font-family: monospace;">${data.error || 'Desconocido'}</code>`;
+          }
+        }
+      } catch (err) {
+        btn.textContent = 'Error';
+        btn.className = 'btn-sm btn-error';
+        if (detailEl) {
+          detailEl.innerHTML = `❌ Error de red al intentar probar la conexión.`;
+        }
+      }
+    });
+  });
+}
+
+function renderFileTypeChips() {
+  const wrap = $('file-type-chips');
+  const summary = $('file-type-summary');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const defaultTypes = fileTypeDefs.map(item => item.key);
+  if (!selectedFileTypes.length) selectedFileTypes = loadStoredFileTypes();
+  if (!selectedFileTypes.length) selectedFileTypes = defaultTypes;
+
+  if (summary) {
+    summary.textContent = selectedFileTypes.length
+      ? `Filtros activos (${selectedFileTypes.length}/${defaultTypes.length || selectedFileTypes.length}): ${selectedFileTypes.join(', ')}`
+      : 'Filtros activos: todos';
+  }
+
+  fileTypeDefs.forEach(def => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `chip ${selectedFileTypes.includes(def.key) ? 'active' : ''}`;
+    btn.textContent = def.label;
+    btn.title = def.description;
+    btn.setAttribute('aria-pressed', selectedFileTypes.includes(def.key) ? 'true' : 'false');
+    btn.addEventListener('click', () => {
+      if (selectedFileTypes.includes(def.key)) {
+        selectedFileTypes = selectedFileTypes.filter(v => v !== def.key);
+      } else {
+        selectedFileTypes = [...selectedFileTypes, def.key];
+      }
+      if (!selectedFileTypes.length) selectedFileTypes = [...defaultTypes];
+      saveStoredFileTypes(selectedFileTypes);
+      renderFileTypeChips();
+      loadFiles();
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+function renderSummaryTable(summaryMap) {
+  _lastSummaryMap = summaryMap || {};
+  const tbody = $('summary-body');
+  if (!tbody) return;
+  const rows = Object.entries(summaryMap || {});
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-row">Sin datos</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(([id, entry]) => {
+    const ds = datasources.find(item => String(item.id) === String(id)) || {};
+    const status = entry?.metrics?.status || 'unknown';
+    return `
+      <tr>
+        <td>${ds.nombre || `BD #${id}`}</td>
+        <td><span class="pill ${entry?.metrics ? 'pill-ok' : 'pill-unk'}">${entry?.metrics ? 'Sí' : 'No'}</span></td>
+        <td><span class="pill ${statusClass(status)}">${status}</span></td>
+        <td>${entry?.ts ? new Date(entry.ts).toLocaleString('es-MX') : '–'}</td>
+        <td title="${(entry?.error || '').replace(/"/g, '&quot;')}">${entry?.error || '–'}</td>
+      </tr>`;
+  }).join('');
+}
+
+function renderDbStatusTable(metricsMap) {
+  _lastMetricsMap = metricsMap || {};
+  const tbody = $('db-status-body');
+  if (!tbody) return;
+  const rows = datasources.map(ds => {
+    const entry = metricsMap?.[ds.id] || {};
+    const m = entry.metrics || {};
+    return `
+      <tr>
+        <td><strong>${ds.nombre}</strong></td>
+        <td>${ds.tipo_db}</td>
+        <td style="font-family:'JetBrains Mono', monospace">${ds.host}:${ds.puerto}</td>
+        <td>${m.threads_connected !== undefined ? `${fmtNum(m.threads_connected)}/${fmtNum(m.max_connections)}` : '–'}</td>
+        <td>${m.cache_hit_ratio !== undefined ? fmtPct(m.cache_hit_ratio) : '–'}</td>
+        <td><span class="pill ${statusClass(m.status || (entry.error ? 'CRITICAL' : 'unknown'))}">${m.status || (entry.error ? 'ERROR' : 'unknown')}</span></td>
+      </tr>`;
+  });
+
+  tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="6" class="empty-row">Sin bases de datos</td></tr>';
+}
+
+function renderAlerts(alerts) {
+  _lastAlerts = alerts || [];
+  const tbody = $('alerts-body');
+  if (!tbody) return;
+  if (!alerts || !alerts.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-row">Sin alertas recientes</td></tr>';
+    return;
+  }
+  tbody.innerHTML = alerts.map(alert => `
+    <tr>
+      <td>${alert.alerted_at ? new Date(alert.alerted_at).toLocaleString('es-MX') : '–'}</td>
+      <td><span class="pill ${statusClass(alert.severity)}">${alert.severity}</span></td>
+      <td>${alert.metric_name || alert.metric || '–'}</td>
+      <td>${alert.metric_value || alert.value || '–'}</td>
+      <td title="${(alert.message || '').replace(/"/g, '&quot;')}">${alert.message || '–'}</td>
+    </tr>
+  `).join('');
+}
+
+function renderAdminOverview(data) {
+  const usersBody = $('admin-users-body');
+  const datasourcesBody = $('admin-datasources-body');
+  if (!usersBody || !datasourcesBody) return;
+
+  const users = data?.users || [];
+  const sources = data?.datasources || [];
+
+  setText('admin-users-count', fmtNum(data?.counts?.users ?? users.length));
+  setText('admin-datasources-count', fmtNum(data?.counts?.datasources ?? sources.length));
+
+  usersBody.innerHTML = users.length ? users.map(user => `
+    <tr>
+      <td>${user.username}</td>
+      <td><span class="pill ${user.role === 'admin' ? 'pill-warn' : 'pill-unk'}">${user.role || 'user'}</span></td>
+      <td><span class="pill ${user.active ? 'pill-ok' : 'pill-crit'}">${user.active ? 'Sí' : 'No'}</span></td>
+      <td>${user.created_at ? new Date(user.created_at).toLocaleString('es-MX') : '–'}</td>
+      <td>${user.last_login ? new Date(user.last_login).toLocaleString('es-MX') : '–'}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="5" class="empty-row">Sin usuarios</td></tr>';
+
+  datasourcesBody.innerHTML = sources.length ? sources.map(source => `
+    <tr>
+      <td><strong>${source.nombre}</strong></td>
+      <td>${source.owner_username || '–'}</td>
+      <td>${source.tipo_db}</td>
+      <td style="font-family:'JetBrains Mono', monospace">${source.host}:${source.puerto}</td>
+      <td>${source.database}</td>
+      <td><span class="pill ${source.activa ? 'pill-ok' : 'pill-unk'}">${source.activa ? 'Activa' : 'Inactiva'}</span></td>
+    </tr>
+  `).join('') : '<tr><td colspan="6" class="empty-row">Sin fuentes</td></tr>';
+}
+
+function renderFiles(data) {
+  const tbody = $('file-table-body');
+  if (!tbody) return;
+  const files = data?.files || [];
+  if (!currentDatasourceId) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-row">Selecciona una base de datos</td></tr>';
+    return;
+  }
+  if (!files.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-row">No hay archivos configurados para los filtros elegidos</td></tr>';
+    return;
+  }
+  tbody.innerHTML = files.map(file => `
+    <tr>
+      <td>${file.label}</td>
+      <td style="font-family:'JetBrains Mono', monospace; white-space:normal; max-width: 340px;">${file.path}</td>
+      <td>${file.kind}</td>
+      <td><span class="pill ${file.exists ? 'pill-ok' : 'pill-crit'}">${file.exists ? 'Sí' : 'No'}</span></td>
+      <td>${file.size_mb ? fmtSizeMB(file.size_mb) : '–'}</td>
+      <td>${file.modified_at ? new Date(file.modified_at).toLocaleString('es-MX') : '–'}</td>
+      <td>${file.entries ?? '–'}</td>
+    </tr>
+  `).join('');
+}
+
+function setKpis(metrics) {
+  if (!metrics) return;
+  setText('kpi-conn-val', `${fmtNum(metrics.threads_connected)}/${fmtNum(metrics.max_connections)}`);
+  setText('kpi-conn-pct', `${fmtPct(metrics.connection_pct)} uso`);
+  setText('kpi-cache-val', fmtPct(metrics.cache_hit_ratio));
+  setText('kpi-cpu-val', fmtPct(metrics.cpu_pct));
+  setText('kpi-mem-val', fmtPct(metrics.mem_pct));
+  setText('kpi-disk-val', fmtPct(metrics.disk_used_pct));
+  setText('kpi-disk-sub', metrics.disk_free_gb !== undefined ? `Libre ${Number(metrics.disk_free_gb).toFixed(2)} GB` : 'Libre –');
+  setText('kpi-status-val', metrics.status || '–');
+  setText('kpi-threads-sub', `${fmtNum(metrics.threads_running)} activos / ${fmtNum(metrics.threads_waiting)} esperando`);
+
+  setBar('kpi-conn-bar', metrics.connection_pct || 0);
+  setBar('kpi-cache-bar', metrics.cache_hit_ratio || 0);
+  setBar('kpi-cpu-bar', metrics.cpu_pct || 0);
+  setBar('kpi-mem-bar', metrics.mem_pct || 0);
+  setBar('kpi-disk-bar', metrics.disk_used_pct || 0);
+
+  const statusEl = $('kpi-status-val');
+  if (statusEl) statusEl.className = `kpi-value ${metrics.status === 'OK' ? 'status-ok' : metrics.status === 'WARNING' ? 'status-warn' : 'status-crit'}`;
+
+  const label = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  pushPoint(label, metrics.threads_connected || 0, metrics.cache_hit_ratio || 0, metrics.cpu_pct || 0, metrics.mem_pct || 0);
+}
+
+async function loadFileTypes() {
+  if (!currentDatasourceId) return;
+  const response = await apiFetch(`/api/file-types?datasource_id=${currentDatasourceId}`);
+  if (!response.ok) return;
+  fileTypeDefs = await response.json();
+  renderFileTypeChips();
+}
+
+async function loadFiles() {
+  if (!currentDatasourceId) {
+    renderFiles({ files: [] });
+    return;
+  }
+  const types = selectedFileTypes.length ? selectedFileTypes.join(',') : '';
+  const response = await apiFetch(`/api/files?datasource_id=${currentDatasourceId}${types ? `&types=${encodeURIComponent(types)}` : ''}`);
+  if (!response.ok) return;
+  const data = await response.json();
+  renderFiles(data);
+  setText('sum-files', fmtNum(data.total || 0));
+  const summary = $('file-type-summary');
+  if (summary) {
+    summary.textContent = data.selected_types && data.selected_types.length
+      ? `Filtros activos (${data.selected_types.length}): ${data.selected_types.join(', ')}`
+      : 'Filtros activos: todos';
+  }
+}
+
+async function loadGlobalSummary() {
+  const response = await apiFetch('/api/summary/global');
+  if (!response.ok) return;
+  const data = await response.json();
+  setGlobalStatus(data.global_status || '–');
+  setText('sum-total', fmtNum(data.total_datasources || 0));
+  setText('sum-online', fmtNum(data.online || 0));
+  setText('sum-offline', fmtNum(data.offline || 0));
+}
+
+async function loadAdminOverview() {
+  if (currentUserRole !== 'admin') return;
+  const response = await apiFetch('/api/admin/overview');
+  if (!response.ok) return;
+  const data = await response.json();
+  renderAdminOverview(data);
+}
+
+async function loadMetricsAndTables() {
+  const [metricsRes, summaryRes, alertsRes] = await Promise.all([
+    apiFetch('/api/metrics'),
+    apiFetch('/api/summary/global'),
+    currentDatasourceId ? apiFetch(`/api/alerts/history?datasource_id=${currentDatasourceId}`) : Promise.resolve(null),
+  ]);
+
+  if (metricsRes && metricsRes.ok) {
+    const metricsMap = await metricsRes.json();
+    renderDbStatusTable(metricsMap);
+    if (currentDatasourceId && metricsMap[currentDatasourceId]?.metrics) {
+      const m = metricsMap[currentDatasourceId].metrics;
+      setKpis(m);
+      setText('last-update', `Actualizado: ${new Date().toLocaleString('es-MX')}`);
+      setText('refresh-value', `${Math.round(REFRESH_MS / 1000)} s`);
+    }
+  }
+
+  if (summaryRes && summaryRes.ok) {
+    const summary = await summaryRes.json();
+    renderSummaryTable(summary.datasources || {});
+  }
+
+  if (alertsRes && alertsRes.ok) {
+    const alerts = await alertsRes.json();
+    renderAlerts(alerts);
+  }
+}
+
+async function loadDatasources() {
+  const response = await apiFetch('/api/datasources');
+  if (!response.ok) return;
+  datasources = await response.json();
+  renderDatasourceSelect();
+  renderDatasourceTable();
+  if (datasources.length) {
+    const stillExists = datasources.some(ds => String(ds.id) === String(currentDatasourceId));
+    if (!stillExists) currentDatasourceId = datasources[0].id;
+  }
+  $('db-select').value = String(currentDatasourceId || '');
+}
+
+async function refreshAll() {
+  const tasks = [loadAdminOverview()];
+  if (currentDatasourceId) {
+    tasks.unshift(loadGlobalSummary(), loadMetricsAndTables(), loadFiles());
+  }
+  await Promise.all(tasks);
+  updateFooter();
+}
+
+function startTimers() {
+  clearInterval(countdownTimer);
+  clearInterval(pollTimer);
+  countdown = Math.max(1, Math.round(REFRESH_MS / 1000));
+  setText('refresh-value', `${countdown} s`);
+  countdownTimer = setInterval(() => {
+    countdown -= 1;
+    if (countdown <= 0) countdown = Math.max(1, Math.round(REFRESH_MS / 1000));
+    setText('refresh-value', `${countdown} s`);
+  }, 1000);
+  pollTimer = setInterval(() => {
+    refreshAll().catch(console.error);
+  }, REFRESH_MS);
+}
+
+async function ensureSession() {
+  try {
+    const response = await fetch('/api/me');
+    if (!response.ok) {
+      applySessionInfo('', 'viewer');
+      showLogin(true);
+      return false;
+    }
+    const data = await response.json();
+    applySessionInfo(data.user || '', data.role || 'viewer');
+    showLogin(false);
+    return true;
+  } catch {
+    applySessionInfo('', 'viewer');
+    showLogin(true);
+    return false;
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  const payload = {
+    username: $('login-user').value.trim(),
+    password: $('login-pass').value,
+  };
+  const errorBox = $('login-error');
+  errorBox.classList.add('hidden');
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      errorBox.textContent = data.error || 'No se pudo iniciar sesión';
+      errorBox.classList.remove('hidden');
+      return;
+    }
+    applySessionInfo(data.user || payload.username, data.role || 'viewer');
+    await boot();
+  } catch (error) {
+    errorBox.textContent = 'Error de red al iniciar sesión';
+    errorBox.classList.remove('hidden');
+  }
+}
+
+async function handleRegister(event) {
+  event.preventDefault();
+  const payload = {
+    username: $('register-user').value.trim(),
+    password: $('register-pass').value,
+    confirm_password: $('register-pass2').value,
+  };
+  const errorBox = $('register-error');
+  errorBox.classList.add('hidden');
+  try {
+    const response = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      errorBox.textContent = data.error || 'No se pudo crear la cuenta';
+      errorBox.classList.remove('hidden');
+      return;
+    }
+    $('login-user').value = payload.username;
+    $('login-pass').value = payload.password;
+    showAuthMode('login');
+    $('login-error').classList.add('hidden');
+    $('login-error').textContent = '';
+    setText('login-error', '');
+    await handleLogin({ preventDefault() {}, });
+  } catch (error) {
+    errorBox.textContent = 'Error de red al crear la cuenta';
+    errorBox.classList.remove('hidden');
+  }
+}
+
+let editingDsId = null;
+
+async function handleDatasourceCreate(event) {
+  event.preventDefault();
+  const payload = {
+    nombre: $('ds-name').value.trim(),
+    tipo_db: $('ds-type').value,
+    host: $('ds-host').value.trim(),
+    puerto: Number($('ds-port').value || 0),
+    usuario: $('ds-user').value.trim(),
+    password: $('ds-pass').value,
+    database: $('ds-db').value.trim(),
+    activa: $('ds-active').checked,
+  };
+  if (!payload.nombre || !payload.host || !payload.usuario || !payload.database || !payload.puerto) return;
+  
+  const isEdit = editingDsId !== null;
+  const url = isEdit ? `/api/datasources/${editingDsId}` : '/api/datasources';
+  const method = isEdit ? 'PUT' : 'POST';
+
+  const response = await apiFetch(url, {
+    method: method,
+    body: JSON.stringify(payload),
+  });
+  
+  if (!response.ok) return;
+  const data = await response.json();
+  
+  // Reset form and editing state
+  editingDsId = null;
+  const submitBtn = document.querySelector('#datasource-form button[type="submit"]');
+  if (submitBtn) submitBtn.textContent = 'Agregar fuente';
+
+  $('datasource-form').reset();
+  $('ds-type').value = payload.tipo_db;
+  $('ds-port').value = payload.tipo_db === 'sqlserver' ? 1433 : payload.tipo_db === 'mongodb' ? 27017 : 5432;
+  $('ds-active').checked = true;
+  
+  await loadDatasources();
+  currentDatasourceId = isEdit ? currentDatasourceId : data.id;
+  $('db-select').value = String(currentDatasourceId);
+  await loadFileTypes();
+  await refreshAll();
+  setActiveTab('files');
+}
+
+window.editDatasource = (id) => {
+  const ds = datasources.find(d => d.id === id);
+  if (!ds) return;
+  editingDsId = ds.id;
+
+  // Fill fields
+  $('ds-name').value = ds.nombre || '';
+  $('ds-type').value = ds.tipo_db || 'postgresql';
+  $('ds-host').value = ds.host || '';
+  $('ds-port').value = ds.puerto || '';
+  $('ds-user').value = ds.usuario || '';
+  $('ds-pass').value = ds.password || '';
+  $('ds-db').value = ds.database || '';
+  $('ds-active').checked = ds.activa !== false;
+
+  // Change submit button text
+  const submitBtn = document.querySelector('#datasource-form button[type="submit"]');
+  if (submitBtn) submitBtn.textContent = 'Guardar cambios';
+
+  // Scroll to form smoothly
+  $('datasource-form').scrollIntoView({ behavior: 'smooth' });
+};
+
+window.deleteDatasource = async (id) => {
+  if (!confirm('¿Estás seguro de eliminar esta fuente de datos?')) return;
+  try {
+    const res = await apiFetch(`/api/datasources/${id}`, { method: 'DELETE' });
+    if (!res.ok) return;
+    
+    if (String(currentDatasourceId) === String(id)) {
+      currentDatasourceId = null;
+    }
+    
+    await loadDatasources();
+    
+    if (!currentDatasourceId && datasources.length) {
+      currentDatasourceId = datasources[0].id;
+    }
+    
+    if (currentDatasourceId) {
+      $('db-select').value = String(currentDatasourceId);
+      await loadFileTypes();
+      await refreshAll();
+    } else {
+      renderFileTypeChips();
+      renderFiles({ files: [] });
+    }
+  } catch (e) { console.error(e); }
+};
+
+async function handleLogout() {
+  await fetch('/api/logout', { method: 'POST' });
+  datasources = [];
+  fileTypeDefs = [];
+  selectedFileTypes = [];
+  currentDatasourceId = null;
+  currentUserRole = 'viewer';
+  applySessionInfo('', 'viewer');
+  showLogin(true);
+}
+
+async function boot() {
+  const ok = await ensureSession();
+  if (!ok) return;
+  setActiveTab(loadStoredTab());
+  await loadDatasources();
+  if (datasources.length) {
+    currentDatasourceId = currentDatasourceId || datasources[0].id;
+    $('db-select').value = String(currentDatasourceId);
+    await loadFileTypes();
+    await refreshAll();
+    startTimers();
+  } else {
+    renderFileTypeChips();
+    renderFiles({ files: [] });
+  }
+  await loadAdminOverview();
+}
+
+/* ── CSV Export ────────────────────────────────────────────────────────────── */
+
+function exportToCSV(headers, rows, filename) {
+  const csv = [
+    headers.join(','),
+    ...rows.map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+  ].join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportAlerts() {
+  if (!_lastAlerts.length) return;
+  const headers = ['Fecha', 'Severidad', 'Métrica', 'Valor', 'Mensaje'];
+  const rows = _lastAlerts.map(a => [
+    a.alerted_at ? new Date(a.alerted_at).toLocaleString('es-MX') : '',
+    a.severity || '',
+    a.metric_name || a.metric || '',
+    a.metric_value || a.value || '',
+    a.message || '',
+  ]);
+  exportToCSV(headers, rows, `alertas_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+function exportSummary() {
+  const entries = Object.entries(_lastSummaryMap);
+  if (!entries.length) return;
+  const headers = ['Base de datos', 'Conectada', 'Estado', 'Último chequeo', 'Error'];
+  const rows = entries.map(([id, entry]) => {
+    const ds = datasources.find(d => String(d.id) === String(id)) || {};
+    return [
+      ds.nombre || `BD #${id}`,
+      entry?.metrics ? 'Sí' : 'No',
+      entry?.metrics?.status || 'unknown',
+      entry?.ts ? new Date(entry.ts).toLocaleString('es-MX') : '',
+      entry?.error || '',
+    ];
+  });
+  exportToCSV(headers, rows, `resumen_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+function exportStatus() {
+  if (!datasources.length) return;
+  const headers = ['Base de datos', 'Tipo', 'Host', 'Conexiones', 'Cache Hit', 'Estado'];
+  const rows = datasources.map(ds => {
+    const entry = _lastMetricsMap?.[ds.id] || {};
+    const m = entry.metrics || {};
+    return [
+      ds.nombre,
+      ds.tipo_db,
+      `${ds.host}:${ds.puerto}`,
+      m.threads_connected !== undefined ? `${m.threads_connected}/${m.max_connections}` : '',
+      m.cache_hit_ratio !== undefined ? `${Number(m.cache_hit_ratio).toFixed(1)}%` : '',
+      m.status || (entry.error ? 'ERROR' : 'unknown'),
+    ];
+  });
+  exportToCSV(headers, rows, `estado_bd_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+async function exportHistory() {
+  const url = currentDatasourceId ? `/api/history?datasource_id=${currentDatasourceId}` : '/api/history';
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.length) {
+      alert('No hay registros históricos para exportar');
+      return;
+    }
+    const headers = ['ID', 'ID Datasource', 'Base de datos', 'Fecha de captura', 'Conexiones Max', 'Conexiones Activas', 'Hilos Corriendo', 'Uso Conexiones %', 'QPS', 'Consultas Lentas', 'Cache Hit Ratio %', 'Tamaño BD MB', 'CPU %', 'Memoria %', 'Estado'];
+    const rows = data.map(r => {
+      const ds = datasources.find(d => String(d.id) === String(r.datasource_id)) || {};
+      return [
+        r.id || '',
+        r.datasource_id || '',
+        ds.nombre || `BD #${r.datasource_id}`,
+        r.captured_at ? new Date(r.captured_at).toLocaleString('es-MX') : '',
+        r.max_connections !== undefined ? r.max_connections : '',
+        r.threads_connected !== undefined ? r.threads_connected : '',
+        r.threads_running !== undefined ? r.threads_running : '',
+        r.connection_pct !== undefined ? `${Number(r.connection_pct).toFixed(1)}%` : '',
+        r.qps !== undefined ? Number(r.qps).toFixed(2) : '',
+        r.slow_queries !== undefined ? r.slow_queries : '',
+        r.cache_hit_ratio !== undefined ? `${Number(r.cache_hit_ratio).toFixed(1)}%` : '',
+        r.db_size_mb !== undefined ? Number(r.db_size_mb).toFixed(2) : '',
+        r.cpu_pct !== undefined ? `${Number(r.cpu_pct).toFixed(1)}%` : '',
+        r.mem_pct !== undefined ? `${Number(r.mem_pct).toFixed(1)}%` : '',
+        r.status || ''
+      ];
+    });
+    const name_suffix = currentDatasourceId ? `ds_${currentDatasourceId}` : 'all';
+    exportToCSV(headers, rows, `historial_${name_suffix}_${new Date().toISOString().slice(0, 10)}.csv`);
+  } catch (err) {
+    console.error('Error al exportar historial:', err);
+  }
+}
+
+async function updateFooter() {
+  try {
+    const res = await fetch('/api/health');
+    if (!res.ok) return;
+    const data = await res.json();
+    setText('footer-version', `DB Health Monitor v${data.version || '1.0.0'}`);
+    setText('footer-uptime', data.uptime_seconds !== undefined ? formatDuration(data.uptime_seconds) : '–');
+    setText('footer-time', data.server_time ? new Date(data.server_time).toLocaleString('es-MX') : '–');
+    setText('footer-sources', fmtNum(datasources.length));
+  } catch {
+    // silent
+  }
+}
+
+/* ── Integrations: API Keys ──────────────────────────────────────────────── */
+
+async function loadApiKeys() {
+  const tbody = $('keys-table-body');
+  if (!tbody) return;
+  try {
+    const res = await apiFetch('/api/integrations/keys');
+    if (!res.ok) return;
+    const keys = await res.json();
+    if (!keys.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-row">No tienes API Keys. Crea una con el botón de arriba.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = keys.map(k => `
+      <tr>
+        <td><strong>${k.name}</strong>${k.owner && k.owner !== currentUsername ? ` <span style="color:var(--muted);font-size:0.75rem;">@${k.owner}</span>` : ''}</td>
+        <td>${k.created_at ? new Date(k.created_at).toLocaleDateString('es-MX') : '–'}</td>
+        <td>${k.last_used ? new Date(k.last_used).toLocaleString('es-MX') : 'Nunca'}</td>
+        <td><span class="pill ${k.active ? 'pill-ok' : 'pill-unk'}">${k.active ? 'Activa' : 'Inactiva'}</span></td>
+        <td style="display:flex;gap:6px;">
+          <button class="btn btn-secondary btn-sm" onclick="toggleApiKey(${k.id})">${k.active ? 'Desactivar' : 'Activar'}</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteApiKey(${k.id})">Revocar</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (e) { console.error(e); }
+}
+
+window.toggleApiKey = async (id) => {
+  await apiFetch(`/api/integrations/keys/${id}/toggle`, { method: 'POST' });
+  loadApiKeys();
+};
+
+window.deleteApiKey = async (id) => {
+  if (!confirm('¿Revocar esta API Key? Esta acción no se puede deshacer.')) return;
+  await apiFetch(`/api/integrations/keys/${id}`, { method: 'DELETE' });
+  loadApiKeys();
+};
+
+/* ── Integrations: Skills ─────────────────────────────────────────────────── */
+
+async function loadSkills() {
+  const grid = $('skills-grid');
+  if (!grid) return;
+  try {
+    const res = await apiFetch('/api/integrations/skills');
+    if (!res.ok) return;
+    const skills = await res.json();
+    if (!skills.length) {
+      const helperMsg = currentUserRole === 'admin' 
+        ? 'No hay Skills. Crea una con el botón de arriba.' 
+        : 'No hay Skills publicadas en el sistema.';
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:28px;color:var(--muted);">${helperMsg}<br/><small>Las Skills son archivos .md de contexto para el asistente.</small></div>`;
+      return;
+    }
+    grid.innerHTML = skills.map(s => {
+      const authorText = s.author ? ` <span style="font-size:0.75rem;color:var(--muted);">por @${s.author}</span>` : '';
+      const isAdmin = currentUserRole === 'admin';
+      
+      const adminActions = isAdmin ? `
+        <div style="display:flex;gap:6px;margin-top:12px;">
+          <button class="btn btn-secondary btn-sm" onclick="toggleSkill(${s.id})">${s.active ? 'Desactivar' : 'Activar'}</button>
+          <button class="btn btn-secondary btn-sm" onclick="editSkill(${s.id})">Editar</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSkill(${s.id})">Eliminar</button>
+        </div>
+      ` : '';
+
+      return `
+        <div class="ig-skill-card">
+          <div class="ig-skill-head">
+            <div class="ig-skill-icon">📄</div>
+            <div>
+              <span class="ig-skill-name">${s.name}</span>
+              ${authorText}
+            </div>
+            <span class="ig-method-pill" style="background:${s.active ? 'rgba(16,185,129,0.1)' : 'rgba(100,116,139,0.1)'};color:${s.active ? '#34d399' : 'var(--muted)'};margin-left:auto;">${s.active ? 'ACTIVA' : 'INACT.'}</span>
+          </div>
+          <div class="ig-skill-desc">${s.description || 'Sin descripción'}</div>
+          ${s.preview ? `<div class="ig-skill-endpoint" style="color:var(--text-light);white-space:pre-wrap;overflow:hidden;text-overflow:ellipsis;-webkit-line-clamp:3;display:-webkit-box;-webkit-box-orient:vertical;">${s.preview}…</div>` : ''}
+          ${adminActions}
+        </div>
+      `;
+    }).join('');
+  } catch (e) { console.error(e); }
+}
+
+window.toggleSkill = async (id) => {
+  await apiFetch(`/api/integrations/skills/${id}/toggle`, { method: 'POST' });
+  loadSkills();
+};
+
+window.deleteSkill = async (id) => {
+  if (!confirm('¿Eliminar esta Skill?')) return;
+  await apiFetch(`/api/integrations/skills/${id}`, { method: 'DELETE' });
+  loadSkills();
+};
+
+/* ── Integrations: Chatbox ────────────────────────────────────────────────── */
+
+function renderMd(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- /gm, '• ')
+    .replace(/\n/g, '<br/>');
+}
+
+function appendChatMsg(role, text, activeSkills = []) {
+  const wrap = $('chat-messages');
+  if (!wrap) return;
+  const div = document.createElement('div');
+  div.className = `chat-msg ${role}`;
+  
+  let skillsBadge = '';
+  if (role === 'bot' && activeSkills && activeSkills.length > 0) {
+    const listStr = activeSkills.join(', ');
+    skillsBadge = `<div class="chat-skills-badge" style="font-size:0.72rem;color:var(--accent-2);margin-top:6px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.15);padding:4px 8px;border-radius:4px;display:inline-block;">📖 Skills aplicadas: [${listStr}]</div>`;
+  } else if (role === 'bot') {
+    skillsBadge = `<div class="chat-skills-badge" style="font-size:0.72rem;color:var(--muted);margin-top:6px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);padding:4px 8px;border-radius:4px;display:inline-block;">⚠️ Ninguna skill activa aplicada</div>`;
+  }
+
+  div.innerHTML = `
+    <div class="chat-msg-avatar">${role === 'bot' ? '🤖' : '👤'}</div>
+    <div class="chat-msg-bubble">
+      ${renderMd(text)}
+      ${skillsBadge}
+    </div>
+  `;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+async function sendChatMessage(msg) {
+  const input = $('chat-input');
+  if (!msg && input) msg = input.value.trim();
+  if (!msg) return;
+  if (input) input.value = '';
+  appendChatMsg('user', msg);
+  // Typing indicator
+  const wrap = $('chat-messages');
+  const typing = document.createElement('div');
+  typing.className = 'chat-msg bot';
+  typing.id = 'chat-typing';
+  typing.innerHTML = `<div class="chat-msg-avatar">🤖</div><div class="chat-msg-bubble" style="color:var(--muted);">Procesando…</div>`;
+  if (wrap) { wrap.appendChild(typing); wrap.scrollTop = wrap.scrollHeight; }
+  try {
+    const res = await apiFetch('/api/integrations/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: msg }),
+    });
+    typing?.remove();
+    if (!res.ok) { appendChatMsg('bot', '⚠️ No pude procesar tu consulta.'); return; }
+    const data = await res.json();
+    appendChatMsg('bot', data.reply || '…', data.active_skills || []);
+  } catch {
+    typing?.remove();
+    appendChatMsg('bot', '⚠️ Error de conexión.');
+  }
+}
+
+window.chatSuggest = (text) => sendChatMessage(text);
+
+/* ── Integrations: code copy ──────────────────────────────────────────────── */
+
+window.igCopy = async (btn, codeId) => {
+  const pre = $(codeId);
+  if (!pre) return;
+  try {
+    await navigator.clipboard.writeText(pre.textContent);
+    btn.textContent = '✅ Copiado';
+    btn.classList.add('ok');
+    setTimeout(() => { btn.textContent = '📋 Copiar'; btn.classList.remove('ok'); }, 2000);
+  } catch { btn.textContent = 'Error'; }
+};
+
+window.igCopyText = async (text) => {
+  try { await navigator.clipboard.writeText(text); } catch {}
+};
+
+/* ── Ig sub-tabs ──────────────────────────────────────────────────────────── */
+
+function bindIgTabs() {
+  document.querySelectorAll('.ig-tab-btn[data-ig]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.getAttribute('data-ig');
+      document.querySelectorAll('.ig-tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.ig-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      const panel = $(`ig-panel-${target}`);
+      if (panel) panel.classList.add('active');
+      if (target === 'keys') loadApiKeys();
+      if (target === 'skills') loadSkills();
+    });
+  });
+}
+
+/* ── Event binding ────────────────────────────────────────────────────────── */
+
+function bindEvents() {
+  $('login-form')?.addEventListener('submit', handleLogin);
+  $('register-form')?.addEventListener('submit', handleRegister);
+  $('datasource-form')?.addEventListener('submit', handleDatasourceCreate);
+  $('logout-btn')?.addEventListener('click', handleLogout);
+  $('datasource-refresh')?.addEventListener('click', async () => {
+    await loadDatasources();
+    if (currentDatasourceId) { await loadFileTypes(); await refreshAll(); }
+  });
+  $('mode-login')?.addEventListener('click', () => showAuthMode('login'));
+  $('mode-register')?.addEventListener('click', () => showAuthMode('register'));
+  $('export-alerts-btn')?.addEventListener('click', exportAlerts);
+  $('export-alerts-btn2')?.addEventListener('click', exportAlerts);
+  $('export-summary-btn')?.addEventListener('click', exportSummary);
+  $('export-summary-btn2')?.addEventListener('click', exportSummary);
+  $('export-status-btn')?.addEventListener('click', exportStatus);
+  $('export-history-btn')?.addEventListener('click', exportHistory);
+
+  // Sidebar nav
+  document.querySelectorAll('.nav-item[data-panel]').forEach(btn => {
+    btn.addEventListener('click', () => setActiveTab(btn.getAttribute('data-panel')));
+  });
+
+  // Profile dropdown — click toggle
+  const profileBtn = document.querySelector('.profile-dropdown-btn');
+  const profileMenu = $('profile-dropdown');
+  if (profileBtn && profileMenu) {
+    profileBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      profileMenu.classList.toggle('open');
+    });
+    // Close when clicking anywhere outside
+    document.addEventListener('click', (e) => {
+      if (!profileBtn.contains(e.target) && !profileMenu.contains(e.target)) {
+        profileMenu.classList.remove('open');
+      }
+    });
+    // Close on Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') profileMenu.classList.remove('open');
+    });
+  }
+
+  // Mobile menu toggle
+  $('mobileMenuBtn')?.addEventListener('click', () => {
+    document.body.classList.toggle('sidebar-open');
+  });
+  document.addEventListener('click', (e) => {
+    if (document.body.classList.contains('sidebar-open')) {
+      const sidebar = $('sidebar');
+      const btn = $('mobileMenuBtn');
+      if (sidebar && !sidebar.contains(e.target) && btn && !btn.contains(e.target)) {
+        document.body.classList.remove('sidebar-open');
+      }
+    }
+  });
+
+  // Desktop sidebar collapse
+  $('desktopSidebarCollapseBtn')?.addEventListener('click', () => {
+    document.body.classList.toggle('sidebar-collapsed');
+    try { localStorage.setItem('sidebar-collapsed', document.body.classList.contains('sidebar-collapsed') ? '1' : '0'); } catch {}
+  });
+  try {
+    if (localStorage.getItem('sidebar-collapsed') === '1') document.body.classList.add('sidebar-collapsed');
+  } catch {}
+
+  // DB select
+  $('db-select')?.addEventListener('change', async (event) => {
+    currentDatasourceId = event.target.value;
+    selectedFileTypes = loadStoredFileTypes();
+    await loadFileTypes();
+    await refreshAll();
+    setActiveTab('files');
+  });
+
+  // Integrations sub-tabs
+  bindIgTabs();
+
+  // Chatbox
+  $('chat-send')?.addEventListener('click', () => sendChatMessage());
+  $('chat-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+  });
+
+  // API Keys create
+  $('key-create-btn')?.addEventListener('click', () => {
+    const form = $('new-key-form');
+    form?.classList.toggle('open');
+    $('key-reveal-box')?.classList.add('hidden');
+  });
+  $('key-cancel-btn')?.addEventListener('click', () => {
+    $('new-key-form')?.classList.remove('open');
+  });
+  $('key-save-btn')?.addEventListener('click', async () => {
+    const name = $('new-key-name')?.value.trim() || 'Mi API Key';
+    try {
+      const res = await apiFetch('/api/integrations/keys', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      $('new-key-form')?.classList.remove('open');
+      $('new-key-name').value = '';
+      const revealBox = $('key-reveal-box');
+      const revealText = $('key-reveal-text');
+      if (revealBox && revealText) {
+        revealText.textContent = data.key;
+        revealBox.classList.remove('hidden');
+      }
+      loadApiKeys();
+    } catch (e) { console.error(e); }
+  });
+
+  // Skills create/edit logic
+  let editingSkillId = null;
+
+  $('skill-add-btn')?.addEventListener('click', () => {
+    editingSkillId = null;
+    const formTitle = document.querySelector('#skill-form-card .ig-section-title');
+    if (formTitle) formTitle.textContent = '✍️ Crear nueva Skill';
+    $('skill-name').value = '';
+    $('skill-desc').value = '';
+    $('skill-content').value = '';
+    $('skill-form-card')?.classList.toggle('open');
+  });
+
+  $('skill-cancel-btn')?.addEventListener('click', () => {
+    editingSkillId = null;
+    $('skill-form-card')?.classList.remove('open');
+  });
+
+  window.editSkill = async (id) => {
+    try {
+      const res = await apiFetch(`/api/integrations/skills/${id}`);
+      if (!res.ok) return;
+      const s = await res.json();
+      editingSkillId = s.id;
+      
+      const formTitle = document.querySelector('#skill-form-card .ig-section-title');
+      if (formTitle) formTitle.textContent = '✍️ Editar Skill';
+      
+      $('skill-name').value = s.name || '';
+      $('skill-desc').value = s.description || '';
+      $('skill-content').value = s.content || '';
+      
+      // Make sure form is open
+      $('skill-form-card')?.classList.add('open');
+      // Scroll to form
+      $('skill-form-card')?.scrollIntoView({ behavior: 'smooth' });
+    } catch (e) { console.error(e); }
+  };
+
+  $('skill-save-btn')?.addEventListener('click', async () => {
+    const name = $('skill-name')?.value.trim();
+    const description = $('skill-desc')?.value.trim();
+    const content = $('skill-content')?.value.trim();
+    if (!name || !content) { alert('El nombre y el contenido son requeridos.'); return; }
+    
+    const isEdit = editingSkillId !== null;
+    const url = isEdit ? `/api/integrations/skills/${editingSkillId}` : '/api/integrations/skills';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    try {
+      const res = await apiFetch(url, {
+        method: method,
+        body: JSON.stringify({ name, description, content }),
+      });
+      if (!res.ok) return;
+      
+      editingSkillId = null;
+      $('skill-form-card')?.classList.remove('open');
+      $('skill-name').value = '';
+      $('skill-desc').value = '';
+      $('skill-content').value = '';
+      loadSkills();
+    } catch (e) { console.error(e); }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  initCharts();
+  bindEvents();
+  // Update dynamic URLs in integrations page
+  document.querySelectorAll('.dynamic-url').forEach(el => {
+    el.textContent = window.location.origin;
+  });
+  // Initialize all panels hidden except overview
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    if (p.id !== 'panel-overview') p.style.display = 'none';
+  });
+  showAuthMode('login');
+  const sessionOk = await ensureSession();
+  if (!sessionOk) { setActiveTab('overview'); return; }
+  await boot();
+});

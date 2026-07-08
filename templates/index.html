@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <meta name="description" content="DB Health Monitor — Panel de monitoreo de bases de datos PostgreSQL, MySQL, MariaDB, SQL Server y MongoDB con API REST integrada."/>
+  <title>DB Health Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+
+<!-- ══ LOGIN ══════════════════════════════════════════════════════════ -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-logo-mark">
+        <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
+          <ellipse cx="16" cy="8" rx="11" ry="4" fill="white" opacity="0.9"/>
+          <rect x="5" y="8" width="22" height="16" fill="white" opacity="0.7"/>
+          <ellipse cx="16" cy="24" rx="11" ry="4" fill="white" opacity="0.85"/>
+          <polyline points="6,16 9,16 11,10 13,22 15,13 17,18 19,16 26,16" stroke="#1e40af" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+      <div>
+        <div class="login-title">DB Health Monitor</div>
+        <div class="login-subtitle">Panel de monitoreo de bases de datos</div>
+      </div>
+    </div>
+    <div class="auth-switch">
+      <button type="button" id="mode-login" class="btn-mode active">Iniciar sesión</button>
+      <button type="button" id="mode-register" class="btn-mode">Crear cuenta</button>
+    </div>
+    <form id="login-form" class="login-form">
+      <div class="form-group">
+        <label class="form-label">Usuario</label>
+        <input id="login-user" class="form-input" type="text" autocomplete="username" placeholder="admin"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña</label>
+        <input id="login-pass" class="form-input" type="password" autocomplete="current-password" placeholder="••••••••"/>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Entrar</button>
+      <div id="login-error" class="login-error hidden"></div>
+    </form>
+    <form id="register-form" class="login-form hidden">
+      <div class="form-group">
+        <label class="form-label">Nuevo usuario</label>
+        <input id="register-user" class="form-input" type="text" autocomplete="username" placeholder="nuevo_usuario"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña</label>
+        <input id="register-pass" class="form-input" type="password" autocomplete="new-password" placeholder="mínimo 6 caracteres"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirmar contraseña</label>
+        <input id="register-pass2" class="form-input" type="password" autocomplete="new-password" placeholder="repite la contraseña"/>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Crear cuenta</button>
+      <div id="register-error" class="login-error hidden"></div>
+    </form>
+    <div class="login-help">Usuarios almacenados en PostgreSQL · Proyecto SI783</div>
+  </div>
+</div>
+
+<!-- ══ APP SHELL ═══════════════════════════════════════════════════════ -->
+<div id="app-shell" class="app-layout hidden">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <a href="#" class="sidebar-logo">
+        <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
+          <ellipse cx="16" cy="8" rx="11" ry="4" fill="#1e40af" opacity="0.9"/>
+          <rect x="5" y="8" width="22" height="16" fill="#1e40af" opacity="0.7"/>
+          <ellipse cx="16" cy="24" rx="11" ry="4" fill="#0ea5e9" opacity="0.85"/>
+          <polyline points="6,16 9,16 11,10 13,22 15,13 17,18 19,16 26,16" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+        <span class="sidebar-logo-text">DB<span class="sidebar-logo-accent">Monitor</span></span>
+      </a>
+      <button id="desktopSidebarCollapseBtn" title="Colapsar sidebar">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="sidebar-section">Monitoreo</div>
+
+      <button class="nav-item active" data-panel="overview" id="nav-overview">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+        </svg>
+        <span>Resumen</span>
+      </button>
+
+      <button class="nav-item" data-panel="sources" id="nav-sources">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+        </svg>
+        <span>Fuentes de datos</span>
+      </button>
+
+      <button class="nav-item" data-panel="files" id="nav-files">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+        </svg>
+        <span>Archivos</span>
+      </button>
+
+      <button class="nav-item" data-panel="status" id="nav-status">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <span>Estado</span>
+      </button>
+
+      <button class="nav-item" data-panel="alerts" id="nav-alerts">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span>Alertas</span>
+      </button>
+
+      <div class="sidebar-section">Sistema</div>
+
+      <button class="nav-item admin-only hidden" data-panel="admin" id="nav-admin">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span>Administración</span>
+      </button>
+
+      <div class="sidebar-section">Configuración</div>
+
+      <button class="nav-item" data-panel="integrations" id="nav-integrations">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/>
+        </svg>
+        <span>Integraciones</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div style="font-size:0.72rem; color:var(--muted); text-align:center;">
+        DB Health Monitor <strong id="sidebar-version" style="color:var(--text-light);">v1.0.0</strong>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-content">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="topbar-left">
+          <button class="mobile-menu-btn" id="mobileMenuBtn" title="Abrir menú">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+          <span class="page-title" id="page-title">Resumen</span>
+        </div>
+        <div class="topbar-right">
+          <div id="conn-dot" class="conn-dot dot-warn" title="Estado de conexión"></div>
+          <div id="global-status" class="status-badge badge-info">Cargando</div>
+          <div class="profile-dropdown-container">
+            <button class="profile-dropdown-btn">
+              <div class="profile-avatar" id="topbar-avatar">–</div>
+              <span class="profile-username" id="topbar-user">–</span>
+              <span class="role-badge" id="topbar-role">–</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="profile-dropdown-menu" id="profile-dropdown">
+              <div style="padding:8px 12px 6px; font-size:0.75rem; color:var(--muted); border-bottom:1px solid var(--panel-border); margin-bottom:4px;">
+                <span id="dropdown-user-info">–</span>
+              </div>
+              <button class="profile-dropdown-item danger" id="logout-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT -->
+    <main class="page-content">
+
+      <!-- ── OVERVIEW ─────────────────────────────────────────────────── -->
+      <section class="tab-panel active" id="panel-overview">
+        <div class="hero-grid">
+          <div class="hero-copy-card">
+            <div class="eyebrow">Monitoreo en tiempo real</div>
+            <h1>Visión clara de tus bases de datos</h1>
+            <p>Selecciona una fuente de datos y monitorea conexiones, rendimiento, disco, memoria y estado del servidor.</p>
+            <div class="hero-pills">
+              <div class="hero-pill"><span>Actualización</span><strong id="refresh-value">10 s</strong></div>
+              <div class="hero-pill"><span>Última lectura</span><strong id="last-update">–</strong></div>
+            </div>
+          </div>
+          <div class="hero-stat-card">
+            <div class="hero-card-head">
+              <span>Resumen global</span>
+              <strong id="global-summary-text">–</strong>
+            </div>
+            <div class="hero-stats">
+              <div class="hero-stat-item"><span>BD activas</span><strong id="sum-total">–</strong></div>
+              <div class="hero-stat-item"><span>Conectadas</span><strong id="sum-online">–</strong></div>
+              <div class="hero-stat-item"><span>Offline</span><strong id="sum-offline">–</strong></div>
+              <div class="hero-stat-item"><span>Archivos</span><strong id="sum-files">–</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card" id="kpi-conn">
+            <div class="kpi-card-top">
+              <div class="kpi-icon">🔌</div>
+              <div>
+                <div class="kpi-label">Conexiones</div>
+                <div class="kpi-value" id="kpi-conn-val">–/–</div>
+                <div class="kpi-sub" id="kpi-conn-pct">– % uso</div>
+              </div>
+            </div>
+            <div class="kpi-bar-wrap"><div class="kpi-bar" id="kpi-conn-bar"></div></div>
+          </div>
+          <div class="kpi-card" id="kpi-cache">
+            <div class="kpi-card-top">
+              <div class="kpi-icon">🗃️</div>
+              <div>
+                <div class="kpi-label">Cache Hit Ratio</div>
+                <div class="kpi-value" id="kpi-cache-val">–</div>
+                <div class="kpi-sub">Motor de BD</div>
+              </div>
+            </div>
+            <div class="kpi-bar-wrap"><div class="kpi-bar" id="kpi-cache-bar"></div></div>
+          </div>
+          <div class="kpi-card" id="kpi-cpu">
+            <div class="kpi-card-top">
+              <div class="kpi-icon">⚡</div>
+              <div>
+                <div class="kpi-label">CPU Host</div>
+                <div class="kpi-value" id="kpi-cpu-val">–</div>
+                <div class="kpi-sub">Uso del servidor</div>
+              </div>
+            </div>
+            <div class="kpi-bar-wrap"><div class="kpi-bar" id="kpi-cpu-bar"></div></div>
+          </div>
+          <div class="kpi-card" id="kpi-mem">
+            <div class="kpi-card-top">
+              <div class="kpi-icon">💾</div>
+              <div>
+                <div class="kpi-label">Memoria Host</div>
+                <div class="kpi-value" id="kpi-mem-val">–</div>
+                <div class="kpi-sub">RAM usada</div>
+              </div>
+            </div>
+            <div class="kpi-bar-wrap"><div class="kpi-bar" id="kpi-mem-bar"></div></div>
+          </div>
+          <div class="kpi-card" id="kpi-disk">
+            <div class="kpi-card-top">
+              <div class="kpi-icon">🧱</div>
+              <div>
+                <div class="kpi-label">Disco</div>
+                <div class="kpi-value" id="kpi-disk-val">–</div>
+                <div class="kpi-sub" id="kpi-disk-sub">Libre –</div>
+              </div>
+            </div>
+            <div class="kpi-bar-wrap"><div class="kpi-bar" id="kpi-disk-bar"></div></div>
+          </div>
+          <div class="kpi-card" id="kpi-status-card">
+            <div class="kpi-card-top">
+              <div class="kpi-icon">🛡️</div>
+              <div>
+                <div class="kpi-label">Estado General</div>
+                <div class="kpi-value" id="kpi-status-val">–</div>
+                <div class="kpi-sub" id="kpi-threads-sub">– activos / – esperando</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-head" style="margin-top:4px;">
+          <h3 class="card-title">📈 Historial de métricas</h3>
+          <div class="section-actions">
+            <button class="btn btn-secondary btn-sm" id="export-history-btn">📥 CSV</button>
+            <span class="section-note">Últimas capturas</span>
+          </div>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h3 class="card-title" style="margin-bottom:14px;">🔌 Conexiones</h3>
+            <canvas id="chart-conn"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3 class="card-title" style="margin-bottom:14px;">🗃️ Cache Hit Ratio</h3>
+            <canvas id="chart-cache"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3 class="card-title" style="margin-bottom:14px;">⚡ CPU / Memoria %</h3>
+            <canvas id="chart-sys"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SOURCES ──────────────────────────────────────────────────── -->
+      <section class="tab-panel" id="panel-sources">
+        <div class="page-hero">
+          <div class="page-hero-copy">
+            <div class="eyebrow">Fuentes de datos</div>
+            <h2>Registra tus bases de datos</h2>
+            <p>Solo ves las fuentes que creaste con tu usuario. Cada fuente queda asociada a tu cuenta.</p>
+          </div>
+          <button id="datasource-refresh" class="btn btn-secondary">↻ Refrescar</button>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">➕ Agregar nueva fuente</h3>
+          </div>
+          <form id="datasource-form" class="datasource-form">
+            <div class="form-group"><label class="form-label">Nombre</label><input id="ds-name" class="form-input" type="text" placeholder="Mi PostgreSQL"/></div>
+            <div class="form-group"><label class="form-label">Tipo</label>
+              <select id="ds-type" class="form-input ds-select">
+                <option value="postgresql">PostgreSQL</option>
+                <option value="mysql">MySQL</option>
+                <option value="mariadb">MariaDB</option>
+                <option value="sqlserver">SQL Server</option>
+                <option value="mongodb">MongoDB</option>
+              </select>
+            </div>
+            <div class="form-group"><label class="form-label">Host</label><input id="ds-host" class="form-input" type="text" placeholder="127.0.0.1"/></div>
+            <div class="form-group"><label class="form-label">Puerto</label><input id="ds-port" class="form-input" type="number" value="5432" min="1"/></div>
+            <div class="form-group"><label class="form-label">Usuario</label><input id="ds-user" class="form-input" type="text" placeholder="usuario_bd"/></div>
+            <div class="form-group"><label class="form-label">Clave</label><input id="ds-pass" class="form-input" type="password" placeholder="opcional"/></div>
+            <div class="form-group"><label class="form-label">Base de datos</label><input id="ds-db" class="form-input" type="text" placeholder="nombre_bd"/></div>
+            <div class="form-group form-check"><input id="ds-active" type="checkbox" checked/><label class="form-label" style="margin:0;">Activa</label></div>
+            <button type="submit" class="btn btn-primary btn-full datasource-submit">Agregar fuente</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">🗄️ Fuentes registradas</h3>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Nombre</th><th>Tipo</th><th>Host</th><th>Base</th><th>Estado</th><th>Acciones</th></tr></thead>
+              <tbody id="datasource-body"></tbody>
+            </table>
+          </div>
+          <div id="datasource-test-detail" class="detail-panel">
+            Selecciona <strong>Probar</strong> para ver el detalle de conexión de una fuente.
+          </div>
+        </div>
+      </section>
+
+      <!-- ── FILES ────────────────────────────────────────────────────── -->
+      <section class="tab-panel" id="panel-files">
+        <div class="page-hero">
+          <div class="page-hero-copy">
+            <div class="eyebrow">Archivos</div>
+            <h2>Archivos y configuración de BD</h2>
+            <p>Selecciona una base de datos y filtra el tipo de archivos que quieres monitorear.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="files-toolbar">
+            <div class="filter-block">
+              <label class="filter-label">Base de datos</label>
+              <select id="db-select" class="form-input ds-select"></select>
+            </div>
+            <div class="filter-block">
+              <label class="filter-label">Tipos de archivo</label>
+              <div id="file-type-chips" class="chip-row"></div>
+              <span id="file-type-summary" class="control-hint">Filtros activos: todos</span>
+            </div>
+          </div>
+          <div class="section-head">
+            <h3 class="card-title">📄 Inventario de archivos</h3>
+            <span class="section-note">Selecciona tipos para filtrar</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Tipo</th><th>Archivo / Ruta</th><th>Clase</th><th>Existe</th><th>Tamaño</th><th>Modificado</th><th>Entradas</th></tr></thead>
+              <tbody id="file-table-body"><tr><td colspan="7" class="empty-row">Selecciona una base de datos</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── STATUS ───────────────────────────────────────────────────── -->
+      <section class="tab-panel" id="panel-status">
+        <div class="page-hero">
+          <div class="page-hero-copy">
+            <div class="eyebrow">Estado</div>
+            <h2>Estado por base de datos</h2>
+            <p>Resumen de conexión y rendimiento de todas tus fuentes registradas.</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="export-status-btn">📥 CSV</button>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>BD</th><th>Tipo</th><th>Host</th><th>Conexiones</th><th>Cache</th><th>Estado</th></tr></thead>
+              <tbody id="db-status-body"><tr><td colspan="6" class="empty-row">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── ALERTS ───────────────────────────────────────────────────── -->
+      <section class="tab-panel" id="panel-alerts">
+        <div class="page-hero">
+          <div class="page-hero-copy">
+            <div class="eyebrow">Alertas</div>
+            <h2>Resumen del sistema</h2>
+            <p>Vista general de todas las bases y alertas detectadas por el monitor.</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="export-summary-btn">📥 CSV</button>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">📊 Estado global</h3>
+            <button class="btn btn-secondary btn-sm" id="export-summary-btn2">📥 CSV</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Base</th><th>Conectada</th><th>Estado</th><th>Último chequeo</th><th>Error</th></tr></thead>
+              <tbody id="summary-body"><tr><td colspan="5" class="empty-row">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">🔔 Alertas recientes</h3>
+            <button class="btn btn-secondary btn-sm" id="export-alerts-btn">📥 CSV</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Fecha</th><th>Severidad</th><th>Métrica</th><th>Valor</th><th>Mensaje</th></tr></thead>
+              <tbody id="alerts-body"><tr><td colspan="5" class="empty-row">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── ADMIN ────────────────────────────────────────────────────── -->
+      <section class="tab-panel admin-only hidden" id="panel-admin">
+        <div class="page-hero">
+          <div class="page-hero-copy">
+            <div class="eyebrow">Administración</div>
+            <h2>Panel de administrador</h2>
+            <p>Todos los usuarios del sistema y todas las fuentes registradas. Solo visible para admin.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">📊 Contadores globales</h3></div>
+          <div class="admin-hero-stats">
+            <div class="admin-stat"><span>Usuarios</span><strong id="admin-users-count">–</strong></div>
+            <div class="admin-stat"><span>Fuentes</span><strong id="admin-datasources-count">–</strong></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">👤 Usuarios registrados</h3><span class="card-note">Cuentas del sistema</span></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Usuario</th><th>Rol</th><th>Activo</th><th>Creado</th><th>Último acceso</th></tr></thead>
+              <tbody id="admin-users-body"><tr><td colspan="5" class="empty-row">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">🗂️ Todas las fuentes</h3><span class="card-note">Visión completa</span></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Nombre</th><th>Dueño</th><th>Tipo</th><th>Host</th><th>Base</th><th>Estado</th></tr></thead>
+              <tbody id="admin-datasources-body"><tr><td colspan="6" class="empty-row">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── INTEGRATIONS ─────────────────────────────────────────────── -->
+      <section class="tab-panel" id="panel-integrations">
+        <div class="page-hero">
+          <div class="page-hero-copy">
+            <div class="eyebrow">Integraciones</div>
+            <h2>API REST · Agentes IA · VS Code</h2>
+            <p>Consume los datos del monitor desde tus propias aplicaciones, integra la <strong>Skill</strong> en agentes como Codex, Antigravity o Copilot, y usa la extensión nativa de VS Code.</p>
+          </div>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="ig-tabs">
+          <button class="ig-tab-btn active" data-ig="api" id="ig-tab-api">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            API REST
+          </button>
+          <button class="ig-tab-btn" data-ig="skills" id="ig-tab-skills">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            Skill para Agentes
+          </button>
+          <button class="ig-tab-btn" data-ig="chat" id="ig-tab-chat">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+            Consultas rápidas
+          </button>
+          <button class="ig-tab-btn" data-ig="keys" id="ig-tab-keys">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            API Keys
+          </button>
+          <button class="ig-tab-btn" data-ig="vscode" id="ig-tab-vscode">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><path d="M14 9l-3 3 3 3"></path></svg>
+            Extensión VS Code
+          </button>
+        </div>
+
+        <!-- IG Panel: API REST -->
+        <div class="ig-panel active" id="ig-panel-api">
+          <div class="ig-info">
+            <span>ℹ️</span>
+            <div><strong>Base URL:</strong> <code style="font-family:var(--font-code);color:var(--accent-2);">http://tu-servidor:5000/api/v1</code> — Autentícate con <strong>Bearer Token</strong> o sesión de navegador.</div>
+          </div>
+
+          <h3 class="ig-section-title">🚀 Inicio rápido</h3>
+          <div class="ig-steps">
+            <div class="ig-step">
+              <div class="ig-step-num">1</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Crea una API Key</div>
+                <div class="ig-step-desc">Ve a la pestaña <strong>API Keys</strong> y genera un token para tu aplicación. El token comienza con <strong>dhm_</strong>.</div>
+              </div>
+            </div>
+            <div class="ig-step">
+              <div class="ig-step-num">2</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Autentica tus peticiones</div>
+                <div class="ig-step-desc">Incluye el header <strong>Authorization: Bearer &lt;tu_api_key&gt;</strong> en todas tus peticiones.</div>
+                <div class="ig-code-wrap">
+                  <div class="ig-code-head">
+                    <span class="ig-code-lang">bash</span>
+                    <button class="ig-copy-btn" onclick="igCopy(this, 'code-auth')">📋 Copiar</button>
+                  </div>
+                  <pre class="ig-code-pre" id="code-auth">curl -H "Authorization: Bearer dhm_TU_API_KEY" \
+  http://tu-servidor:5000/api/v1/health</pre>
+                </div>
+              </div>
+            </div>
+            <div class="ig-step">
+              <div class="ig-step-num">3</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Consulta métricas en tiempo real</div>
+                <div class="ig-step-desc">Obtén el estado de todas tus bases de datos en una sola petición.</div>
+                <div class="ig-code-wrap">
+                  <div class="ig-code-head">
+                    <span class="ig-code-lang">bash</span>
+                    <button class="ig-copy-btn" onclick="igCopy(this, 'code-metrics')">📋 Copiar</button>
+                  </div>
+                  <pre class="ig-code-pre" id="code-metrics">curl -H "Authorization: Bearer dhm_TU_API_KEY" \
+  http://tu-servidor:5000/api/v1/summary</pre>
+                </div>
+              </div>
+            </div>
+            <div class="ig-step">
+              <div class="ig-step-num">4</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Ejemplo con Python</div>
+                <div class="ig-step-desc">Integra el monitor en tus scripts de automatización o dashboards externos.</div>
+                <div class="ig-code-wrap">
+                  <div class="ig-code-head">
+                    <span class="ig-code-lang">python</span>
+                    <button class="ig-copy-btn" onclick="igCopy(this, 'code-python')">📋 Copiar</button>
+                  </div>
+                  <pre class="ig-code-pre" id="code-python">import requests
+
+API_KEY = "dhm_TU_API_KEY"
+BASE_URL = "http://tu-servidor:5000/api/v1"
+headers = {"Authorization": f"Bearer {API_KEY}"}
+
+# Resumen global
+r = requests.get(f"{BASE_URL}/summary", headers=headers)
+data = r.json()
+print(f"Bases: {data['total_datasources']} | Online: {data['online']}")
+
+# Métricas por datasource
+r = requests.get(f"{BASE_URL}/metrics", headers=headers)
+metrics = r.json()
+for ds_id, entry in metrics.items():
+    m = entry.get("metrics", {})
+    print(f"DS {ds_id}: CPU={m.get('cpu_pct')}% Cache={m.get('cache_hit_ratio')}%")</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="ig-divider"/>
+
+          <h3 class="ig-section-title">📋 Endpoints disponibles</h3>
+          <div class="ig-skills-grid">
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">🏥</div>
+                <span class="ig-skill-name">Health check</span>
+                <span class="ig-method-pill ig-method-get">GET</span>
+              </div>
+              <div class="ig-skill-desc">Estado del servidor, versión y uptime del monitor.</div>
+              <div class="ig-skill-endpoint">GET /api/v1/health</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">📊</div>
+                <span class="ig-skill-name">Resumen global</span>
+                <span class="ig-method-pill ig-method-get">GET</span>
+              </div>
+              <div class="ig-skill-desc">Total de fuentes, cuántas están online y estado global.</div>
+              <div class="ig-skill-endpoint">GET /api/v1/summary</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">⚡</div>
+                <span class="ig-skill-name">Métricas</span>
+                <span class="ig-method-pill ig-method-get">GET</span>
+              </div>
+              <div class="ig-skill-desc">CPU, memoria, disco, cache hit, conexiones en tiempo real.</div>
+              <div class="ig-skill-endpoint">GET /api/v1/metrics[?datasource_id=N]</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">🗄️</div>
+                <span class="ig-skill-name">Datasources</span>
+                <span class="ig-method-pill ig-method-get">GET</span>
+              </div>
+              <div class="ig-skill-desc">Lista las fuentes de datos registradas en tu cuenta.</div>
+              <div class="ig-skill-endpoint">GET /api/v1/datasources</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">📈</div>
+                <span class="ig-skill-name">Historial</span>
+                <span class="ig-method-pill ig-method-get">GET</span>
+              </div>
+              <div class="ig-skill-desc">Capturas históricas de métricas almacenadas en BD.</div>
+              <div class="ig-skill-endpoint">GET /api/v1/history[?datasource_id=N]</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">🔔</div>
+                <span class="ig-skill-name">Alertas</span>
+                <span class="ig-method-pill ig-method-get">GET</span>
+              </div>
+              <div class="ig-skill-desc">Historial de alertas generadas por el monitor.</div>
+              <div class="ig-skill-endpoint">GET /api/v1/alerts[?datasource_id=N]</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">⚡</div>
+                <span class="ig-skill-name">Consultas rápidas</span>
+                <span class="ig-method-pill ig-method-post">POST</span>
+              </div>
+              <div class="ig-skill-desc">Consulta el estado del sistema por comandos predefinidos (CPU, memoria, disco, alertas…)</div>
+              <div class="ig-skill-endpoint">POST /api/integrations/chat</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head">
+                <div class="ig-skill-icon">🔑</div>
+                <span class="ig-skill-name">API Keys</span>
+                <span class="ig-method-pill ig-method-post">POST</span>
+              </div>
+              <div class="ig-skill-desc">Crea y gestiona tus API Keys para acceso programático.</div>
+              <div class="ig-skill-endpoint">GET|POST /api/integrations/keys</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- IG Panel: Skill para Agentes IA -->
+        <div class="ig-panel" id="ig-panel-skills">
+
+          <!-- Hero banner -->
+          <div class="ig-info" style="border-left-color:var(--accent);background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(56,189,248,0.06));margin-bottom:24px;">
+            <span style="font-size:1.8rem;">🤖</span>
+            <div style="flex:1;">
+              <strong style="font-size:1.05rem;color:var(--text);">Skill oficial del Monitor de Salud DB</strong>
+              <p style="margin:6px 0 12px;color:var(--text-light);line-height:1.6;">Esta skill le permite a cualquier <strong>agente de IA</strong> (Codex, Antigravity, Copilot, Cursor, etc.) interactuar de forma autónoma con tus bases de datos: consultar métricas, revisar alertas, leer logs y más — todo usando la API REST o el CLI local de la extensión.</p>
+              <a href="/api/skill/download" download="db-health-monitor-skill.md"
+                 style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#fff;padding:9px 18px;border-radius:var(--radius-md);font-weight:600;font-size:0.88rem;text-decoration:none;transition:var(--transition);box-shadow:0 4px 14px rgba(99,102,241,0.35);"
+                 onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 20px rgba(99,102,241,0.5)'"
+                 onmouseout="this.style.transform='';this.style.boxShadow='0 4px 14px rgba(99,102,241,0.35)'">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Descargar SKILL.md
+              </a>
+            </div>
+          </div>
+
+          <!-- STEP 1 -->
+          <h3 class="ig-section-title">🚀 Cómo integrar la Skill en tu agente</h3>
+          <div class="ig-steps">
+
+            <div class="ig-step">
+              <div class="ig-step-num">1</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">⚠️ Obtén tu API Token primero</div>
+                <div class="ig-step-desc">
+                  <div class="ig-warn" style="margin-top:8px;">
+                    <span>🔑</span>
+                    <div>Antes de configurar cualquier agente, ve a la pestaña <strong>API Keys</strong> de esta sección y genera un token personal. El token tiene el formato <code>dhm_xxxxxxxxxxxx</code>. <strong>Cópialo inmediatamente</strong> — el sistema no lo volverá a mostrar completo.</div>
+                  </div>
+                  <div style="margin-top:12px;">
+                    <button class="btn btn-primary btn-sm" onclick="document.querySelector('[data-ig=keys]').click()">🔑 Ir a API Keys →</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ig-step">
+              <div class="ig-step-num">2</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Descarga el archivo SKILL.md</div>
+                <div class="ig-step-desc">
+                  El repositorio incluye el manifiesto de la skill en <code>.agents/skills/db-health-monitor/SKILL.md</code>. Este archivo contiene el <strong>frontmatter YAML</strong> con nombre y descripción que los agentes leen automáticamente, además de instrucciones detalladas de uso.
+                  <div class="ig-code-wrap" style="margin-top:10px;">
+                    <div class="ig-code-head"><span class="ig-code-lang">yaml</span><button class="ig-copy-btn" onclick="igCopy(this,'skill-frontmatter')">📋 Copiar</button></div>
+                    <pre class="ig-code-pre" id="skill-frontmatter">---
+name: db-health-monitor
+description: &gt;
+  Interactúa con el Monitor de Salud DB para listar bases
+  de datos, consultar métricas en tiempo real, obtener
+  historiales, leer logs y auditar alertas. Usa la API REST
+  con tu Bearer Token o el CLI local (helper.py).
+---</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ig-step">
+              <div class="ig-step-num">3</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Úsala con Codex CLI</div>
+                <div class="ig-step-desc">
+                  Si usas <strong>OpenAI Codex CLI</strong>, coloca el archivo en <code>~/.codex/skills/</code> o referéncialo en tu <code>codex.yaml</code>. El agente detectará automáticamente la skill y la usará para responder preguntas sobre el estado de tus bases de datos.
+                  <div class="ig-code-wrap" style="margin-top:10px;">
+                    <div class="ig-code-head"><span class="ig-code-lang">bash</span><button class="ig-copy-btn" onclick="igCopy(this,'code-codex')">📋 Copiar</button></div>
+                    <pre class="ig-code-pre" id="code-codex"># Instalar la skill en Codex
+cp .agents/skills/db-health-monitor/SKILL.md ~/.codex/skills/db-health-monitor.md
+
+# Consultar el estado de tus bases de datos
+codex "¿Cuáles son las bases de datos registradas y su estado?"</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ig-step">
+              <div class="ig-step-num">4</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Úsala con Antigravity / Cursor / Copilot</div>
+                <div class="ig-step-desc">
+                  Para agentes basados en workspace (como Antigravity IDE, Cursor o GitHub Copilot Workspace), basta con tener el directorio <code>.agents/</code> en la raíz del repositorio. El agente detecta y carga la skill automáticamente al abrir el proyecto.
+                  <div class="ig-code-wrap" style="margin-top:10px;">
+                    <div class="ig-code-head"><span class="ig-code-lang">bash</span><button class="ig-copy-btn" onclick="igCopy(this,'code-workspace-skill')">📋 Copiar</button></div>
+                    <pre class="ig-code-pre" id="code-workspace-skill"># La estructura ya está lista en el repo:
+.agents/
+  skills/
+    db-health-monitor/
+      SKILL.md   ← detectado automáticamente</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ig-step">
+              <div class="ig-step-num">5</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Ejemplo: script Python para agentes</div>
+                <div class="ig-step-desc">
+                  Este patrón muestra cómo un agente puede usar la skill para obtener métricas reales de forma autónoma vía API REST.
+                  <div class="ig-code-wrap" style="margin-top:10px;">
+                    <div class="ig-code-head"><span class="ig-code-lang">python</span><button class="ig-copy-btn" onclick="igCopy(this,'code-skill-py')">📋 Copiar</button></div>
+                    <pre class="ig-code-pre" id="code-skill-py">import requests
+
+# Token generado en la pestaña API Keys
+API_KEY = "dhm_TU_TOKEN_AQUI"
+BASE_URL = "http://38.250.116.71:5000"
+headers = {"Authorization": f"Bearer {API_KEY}"}
+
+# 1. Listar todas las bases de datos registradas
+ds = requests.get(f"{BASE_URL}/api/datasources", headers=headers).json()
+for db in ds:
+    print(f"{db['nombre']} ({db['tipo_db']}) → {db['status']}")
+
+# 2. Obtener métricas de la primera base de datos
+if ds:
+    ds_id = ds[0]['id']
+    m = requests.get(f"{BASE_URL}/api/metrics?datasource_id={ds_id}", headers=headers).json()
+    print(f"CPU: {m.get('cpu_pct')}% | Cache: {m.get('cache_hit_ratio')}%")
+
+# 3. Revisar alertas recientes
+alertas = requests.get(f"{BASE_URL}/api/alerts", headers=headers).json()
+for a in alertas[:5]:
+    print(f"[{a['severity']}] {a['message']}")</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <hr class="ig-divider"/>
+
+          <!-- Endpoints reference cards -->
+          <h3 class="ig-section-title">📋 Endpoints disponibles para agentes</h3>
+          <div class="ig-skills-grid">
+            <div class="ig-skill-card">
+              <div class="ig-skill-head"><div class="ig-skill-icon">🗄️</div><span class="ig-skill-name">Bases de datos</span><span class="ig-method-pill ig-method-get">GET</span></div>
+              <div class="ig-skill-desc">Lista las fuentes de datos registradas con su estado de salud.</div>
+              <div class="ig-skill-endpoint">GET /api/datasources</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head"><div class="ig-skill-icon">⚡</div><span class="ig-skill-name">Métricas en vivo</span><span class="ig-method-pill ig-method-get">GET</span></div>
+              <div class="ig-skill-desc">CPU, memoria, disco, cache hit, conexiones activas en tiempo real.</div>
+              <div class="ig-skill-endpoint">GET /api/metrics?datasource_id=N</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head"><div class="ig-skill-icon">📈</div><span class="ig-skill-name">Historial</span><span class="ig-method-pill ig-method-get">GET</span></div>
+              <div class="ig-skill-desc">Últimas 50 capturas históricas de rendimiento almacenadas.</div>
+              <div class="ig-skill-endpoint">GET /api/history?datasource_id=N</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head"><div class="ig-skill-icon">🔔</div><span class="ig-skill-name">Alertas</span><span class="ig-method-pill ig-method-get">GET</span></div>
+              <div class="ig-skill-desc">Historial de alertas WARNING/CRITICAL generadas por el monitor.</div>
+              <div class="ig-skill-endpoint">GET /api/alerts?datasource_id=N</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head"><div class="ig-skill-icon">📂</div><span class="ig-skill-name">Archivos / Logs</span><span class="ig-method-pill ig-method-get">GET</span></div>
+              <div class="ig-skill-desc">Inventario de archivos de logs y configuración de la base de datos.</div>
+              <div class="ig-skill-endpoint">GET /api/files?datasource_id=N</div>
+            </div>
+            <div class="ig-skill-card">
+              <div class="ig-skill-head"><div class="ig-skill-icon">🏥</div><span class="ig-skill-name">Health check</span><span class="ig-method-pill ig-method-get">GET</span></div>
+              <div class="ig-skill-desc">Estado del servidor, versión y uptime del monitor en vivo.</div>
+              <div class="ig-skill-endpoint">GET /api/v1/health</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- IG Panel: Consultas rápidas -->
+        <div class="ig-panel" id="ig-panel-chat">
+          
+          <!-- Future AI Notice Card -->
+          <div class="ig-info" style="border-left-color: var(--accent-2); background: rgba(56,189,248,0.04); margin-bottom: 20px;">
+            <span>🤖</span>
+            <div>
+              <strong>Futura integración con IA:</strong> Actualmente este asistente procesa consultas localmente (motor de coincidencia de intenciones) sin consumir tokens. En el futuro, podrá conectarse directamente a modelos generativos (Gemini/OpenAI) usando el prompt y contexto de tus <strong>Skills (.md) activas</strong>.
+            </div>
+          </div>
+
+          <div class="chatbox-wrap" style="border-color: var(--panel-border); background: var(--sidebar-bg); max-width: 800px; margin: 0 auto; border-radius: var(--radius-lg); overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);">
+            <div class="chatbox-header" style="background: var(--panel-bg); border-bottom: 1px solid var(--panel-border); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="chatbox-header-dot" style="width: 8px; height: 8px; background: var(--accent-2); border-radius: 50%; box-shadow: 0 0 8px var(--accent-2);"></div>
+                <div class="chatbox-title" style="font-family: var(--font-title); font-weight: 600; font-size: 0.95rem; color: var(--text);">Asistente de Diagnóstico Local</div>
+              </div>
+              <span class="chatbox-subtitle" style="font-size: 0.75rem; color: var(--muted);">Modo: Offline (Sin Tokens)</span>
+            </div>
+            
+            <div class="chatbox-messages" id="chat-messages" style="height: 320px; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; background: rgba(11,22,34,0.4);">
+              <div class="chat-msg bot" style="display: flex; gap: 12px; max-width: 85%;">
+                <div class="chat-msg-avatar" style="width: 32px; height: 32px; background: var(--panel-bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.95rem; border: 1px solid var(--panel-border);">🤖</div>
+                <div class="chat-msg-bubble" style="background: var(--panel-bg); border: 1px solid var(--panel-border); padding: 12px 16px; border-radius: 4px 16px 16px 16px; font-size: 0.88rem; color: var(--text-light); line-height: 1.5;">
+                  ¡Hola! Soy tu **Asistente Local**. Puedo ayudarte a diagnosticar el estado del servidor. Haz clic en las sugerencias rápidas o escribe tu pregunta abajo.
+                </div>
+              </div>
+            </div>
+            
+            <div class="chatbox-suggestions" style="display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--panel-border); background: var(--panel-bg);">
+              <button class="chat-suggest" onclick="chatSuggest('¿Cómo está el CPU?')" style="background: var(--sidebar-bg); border: 1px solid var(--panel-border); color: var(--text-light); padding: 6px 12px; border-radius: 100px; font-size: 0.78rem; cursor: pointer; transition: var(--transition);">⚡ CPU</button>
+              <button class="chat-suggest" onclick="chatSuggest('Estado de la memoria RAM')" style="background: var(--sidebar-bg); border: 1px solid var(--panel-border); color: var(--text-light); padding: 6px 12px; border-radius: 100px; font-size: 0.78rem; cursor: pointer; transition: var(--transition);">💾 Memoria</button>
+              <button class="chat-suggest" onclick="chatSuggest('Estado del disco')" style="background: var(--sidebar-bg); border: 1px solid var(--panel-border); color: var(--text-light); padding: 6px 12px; border-radius: 100px; font-size: 0.78rem; cursor: pointer; transition: var(--transition);">🧱 Disco</button>
+              <button class="chat-suggest" onclick="chatSuggest('Conexiones activas')" style="background: var(--sidebar-bg); border: 1px solid var(--panel-border); color: var(--text-light); padding: 6px 12px; border-radius: 100px; font-size: 0.78rem; cursor: pointer; transition: var(--transition);">🔌 Conexiones</button>
+              <button class="chat-suggest" onclick="chatSuggest('Muestra el caché')" style="background: var(--sidebar-bg); border: 1px solid var(--panel-border); color: var(--text-light); padding: 6px 12px; border-radius: 100px; font-size: 0.78rem; cursor: pointer; transition: var(--transition);">🗃️ Cache</button>
+              <button class="chat-suggest" onclick="chatSuggest('¿Hay alertas recientes?')" style="background: var(--sidebar-bg); border: 1px solid var(--panel-border); color: var(--text-light); padding: 6px 12px; border-radius: 100px; font-size: 0.78rem; cursor: pointer; transition: var(--transition);">🔔 Alertas</button>
+              <button class="chat-suggest" onclick="chatSuggest('Estado de salud global')" style="background: var(--sidebar-bg); border: 1px solid var(--panel-border); color: var(--text-light); padding: 6px 12px; border-radius: 100px; font-size: 0.78rem; cursor: pointer; transition: var(--transition);">📊 Resumen</button>
+            </div>
+
+            <div class="chatbox-input-row" style="display: grid; grid-template-columns: 1fr auto; border-top: 1px solid var(--panel-border); background: var(--panel-bg);">
+              <input class="chatbox-input" id="chat-input" type="text" placeholder="Escribe una pregunta... ej: ¿hay alertas críticas?" autocomplete="off" style="background: transparent; border: none; outline: none; padding: 16px 20px; font-family: var(--font-body); font-size: 0.88rem; color: var(--text); width: 100%;" />
+              <button class="chatbox-send" id="chat-send" style="background: var(--accent); border: none; outline: none; color: white; padding: 0 24px; cursor: pointer; transition: var(--transition); display: flex; align-items: center; justify-content: center;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- IG Panel: API Keys -->
+        <div class="ig-panel" id="ig-panel-keys">
+          <div class="ig-warn">
+            <span>🔐</span>
+            <div><strong>Importante:</strong> Al crear una API Key, el token completo solo se muestra <strong>una vez</strong>. Guárdalo en un lugar seguro. El sistema solo almacena el hash.</div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 class="ig-section-title" style="margin:0;">🔑 Mis API Keys</h3>
+            <button class="btn btn-primary btn-sm" id="key-create-btn">+ Crear API Key</button>
+          </div>
+
+          <!-- New key modal inline -->
+          <div id="new-key-form" class="skill-form-card">
+            <h3 class="ig-section-title" style="margin-bottom:12px;">🔑 Nueva API Key</h3>
+            <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:12px;">
+              <div class="form-group"><label class="form-label">Nombre descriptivo</label><input id="new-key-name" class="form-input" type="text" placeholder="Dashboard externo, CI/CD, etc."/></div>
+              <div style="display:flex;align-items:flex-end;gap:8px;">
+                <button class="btn btn-primary btn-sm" id="key-save-btn">Generar</button>
+                <button class="btn btn-secondary btn-sm" id="key-cancel-btn">Cancelar</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Token reveal box -->
+          <div id="key-reveal-box" class="hidden" style="margin-bottom:16px;">
+            <div class="ig-success" style="margin-bottom:12px;">
+              <span>✅</span>
+              <div><strong>API Key generada exitosamente.</strong> Cópiala ahora — no se volverá a mostrar.</div>
+            </div>
+            <div class="ig-token-display-box">
+              <code id="key-reveal-text"></code>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="igCopyText(document.getElementById('key-reveal-text').textContent)">📋 Copiar token</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Nombre</th><th>Creada</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead>
+              <tbody id="keys-table-body"><tr><td colspan="5" class="empty-row">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- IG Panel: VS Code Extension -->
+        <div class="ig-panel" id="ig-panel-vscode">
+
+          <!-- Hero card -->
+          <div style="background:linear-gradient(135deg,rgba(99,102,241,0.12),rgba(56,189,248,0.08));border:1px solid rgba(99,102,241,0.3);border-radius:var(--radius-lg);padding:28px 32px;margin-bottom:28px;display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+            <div style="font-size:3.5rem;line-height:1;">🔌</div>
+            <div style="flex:1;min-width:200px;">
+              <h3 style="margin:0 0 8px;font-size:1.2rem;color:var(--text);">Monitor de Salud DB — Extensión para VS Code</h3>
+              <p style="margin:0 0 20px;color:var(--text-light);line-height:1.6;">Panel lateral premium con glassmorphism, indicadores LED en tiempo real, dashboard de métricas con gráficas suavizadas y auditoría de seguridad SQL integrada directamente en tu editor.</p>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                <a href="https://marketplace.visualstudio.com/items?itemName=Gerardo95.db-health-monitor" target="_blank" rel="noopener"
+                   style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#fff;padding:10px 20px;border-radius:var(--radius-md);font-weight:600;font-size:0.9rem;text-decoration:none;transition:var(--transition);box-shadow:0 4px 15px rgba(99,102,241,0.4);"
+                   onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 20px rgba(99,102,241,0.5)'"
+                   onmouseout="this.style.transform='';this.style.boxShadow='0 4px 15px rgba(99,102,241,0.4)'">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Descargar del Marketplace
+                </a>
+                <a href="vscode:extension/Gerardo95.db-health-monitor"
+                   style="display:inline-flex;align-items:center;gap:8px;background:rgba(56,189,248,0.12);color:var(--accent-2);border:1px solid rgba(56,189,248,0.35);padding:10px 20px;border-radius:var(--radius-md);font-weight:600;font-size:0.9rem;text-decoration:none;transition:var(--transition);"
+                   onmouseover="this.style.background='rgba(56,189,248,0.2)';this.style.transform='translateY(-2px)'"
+                   onmouseout="this.style.background='rgba(56,189,248,0.12)';this.style.transform=''">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><path d="M14 9l-3 3 3 3"/></svg>
+                  Abrir en VS Code
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <h3 class="ig-section-title">⚙️ Configuración de la extensión</h3>
+          <div class="ig-steps">
+
+            <div class="ig-step">
+              <div class="ig-step-num">1</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">⚠️ Genera tu API Token primero</div>
+                <div class="ig-step-desc">
+                  <div class="ig-warn" style="margin-top:8px;">
+                    <span>🔑</span>
+                    <div>Ve a la pestaña <strong>API Keys</strong> y genera un token personal antes de configurar la extensión. El token tiene el formato <code>dhm_xxxxxxxxxxxx</code>. <strong>Guárdalo ahora</strong> — no podrás verlo completo de nuevo.</div>
+                  </div>
+                  <div style="margin-top:12px;">
+                    <button class="btn btn-primary btn-sm" onclick="document.querySelector('[data-ig=keys]').click()">🔑 Ir a API Keys →</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ig-step">
+              <div class="ig-step-num">2</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Instala la extensión</div>
+                <div class="ig-step-desc">
+                  Usa los botones de arriba para instalarlo desde el Marketplace, o bien desde el VSIX compilado:
+                  <div class="ig-code-wrap" style="margin-top:8px;">
+                    <div class="ig-code-head"><span class="ig-code-lang">shell</span><button class="ig-copy-btn" onclick="igCopy(this,'code-install')">📋 Copiar</button></div>
+                    <pre class="ig-code-pre" id="code-install">code --install-extension vscode/db-health-monitor-0.1.5.vsix</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ig-step">
+              <div class="ig-step-num">3</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Abre la Paleta de Comandos y conecta</div>
+                <div class="ig-step-desc">
+                  En VS Code, presiona <code>Ctrl+Shift+P</code> y ejecuta <strong>DHM: Conectar al Servidor</strong>. Ingresa:
+                  <ul style="margin-top:8px;">
+                    <li><strong>Python Path:</strong> ruta a tu intérprete Python con dependencias instaladas</li>
+                  </ul>
+                  La extensión lee el <code>config.ini</code> del workspace actual automáticamente.
+                </div>
+              </div>
+            </div>
+
+            <div class="ig-step">
+              <div class="ig-step-num">4</div>
+              <div class="ig-step-body">
+                <div class="ig-step-title">Explora el Panel Lateral</div>
+                <div class="ig-step-desc">
+                  Haz clic en el ícono <strong>Monitor de Salud DB</strong> en la Barra de Actividad. Verás:
+                  <ul style="margin-top:8px;">
+                    <li>🟢 <strong>Pestaña Bases de Datos</strong>: tarjetas con LED neón de estado en tiempo real y botón «Ver Dashboard»</li>
+                    <li>🔍 <strong>Pestaña Auditoría SQL</strong>: escaneo recursivo de archivos <code>.sql</code> con detección de inyecciones, credenciales expuestas y privilegios peligrosos — con navegación directa a la línea exacta del problema</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </section>
+      <!-- /INTEGRATIONS -->
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="app-footer">
+      <div class="footer-inner">
+        <div>🛡️ <strong id="footer-version">DB Health Monitor v1.0.0</strong></div>
+        <div class="footer-sep"></div>
+        <div>Servidor activo <strong id="footer-uptime">–</strong></div>
+        <div class="footer-sep"></div>
+        <div>Hora servidor <strong id="footer-time">–</strong></div>
+        <div class="footer-sep"></div>
+        <div>Fuentes <strong id="footer-sources">–</strong></div>
+      </div>
+    </footer>
+  </div>
+  <!-- /MAIN CONTENT -->
+
+</div>
+<!-- /APP SHELL -->
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        :root {
+            --bg: var(--vscode-sideBar-background, #1e1e1e);
+            --fg: var(--vscode-sideBar-foreground, #d4d4d4);
+            --border: var(--vscode-sideBar-border, rgba(255, 255, 255, 0.08));
+            --text-muted: var(--vscode-descriptionForeground, #858585);
+            --font: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+            
+            --accent-blue: var(--vscode-button-background, #007acc);
+            --accent-blue-hover: var(--vscode-button-hoverBackground, #0062a3);
+            --card-bg: rgba(255, 255, 255, 0.02);
+            --card-border: rgba(255, 255, 255, 0.06);
+
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #38bdf8;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--fg);
+            font-family: var(--font);
+            margin: 0;
+            padding: 12px;
+            box-sizing: border-box;
+            font-size: 12px;
+            overflow-x: hidden;
+        }
+
+        /* Tabs System */
+        .tabs-header {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 12px;
+            gap: 4px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 8px 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            text-align: center;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--fg);
+        }
+
+        .tab-btn.active {
+            color: var(--vscode-panelTitle-activeForeground, #ffffff);
+            border-bottom: 2px solid var(--vscode-panelTitle-activeBorder, #007acc);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Cards Layout */
+        .card-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            padding: 10px 12px;
+            position: relative;
+            transition: all 0.2s ease-in-out;
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        /* Database Cards */
+        .db-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .db-title {
+            font-weight: 600;
+            font-size: 12px;
+            color: var(--vscode-editor-foreground, #ffffff);
+        }
+
+        .db-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .db-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+
+        .dot-pulse {
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-glow {
+            0% { opacity: 0.5; transform: scale(0.9); }
+            50% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 6px currentColor; }
+            100% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        .action-btn {
+            background: var(--accent-blue);
+            color: var(--vscode-button-foreground, #ffffff);
+            border: none;
+            border-radius: 3px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 10px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+
+        .action-btn:hover {
+            background: var(--accent-blue-hover);
+        }
+
+        /* SQL Audit Cards */
+        .scan-action-bar {
+            margin-bottom: 12px;
+        }
+
+        .scan-btn {
+            width: 100%;
+            padding: 8px;
+            font-weight: 600;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .file-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .file-name {
+            font-weight: 600;
+            color: var(--vscode-editor-foreground, #ffffff);
+            text-decoration: none;
+        }
+
+        .file-name:hover {
+            text-decoration: underline;
+        }
+
+        .file-path {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .badge-list {
+            display: flex;
+            gap: 4px;
+        }
+
+        .badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 10px;
+            color: #ffffff;
+        }
+
+        .badge-danger { background-color: var(--danger); }
+        .badge-warning { background-color: var(--warning); }
+        .badge-info { background-color: var(--info); }
+        .badge-success { background-color: var(--success); }
+
+        .findings-list {
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .finding-item {
+            padding: 4px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            gap: 6px;
+            align-items: flex-start;
+            transition: background-color 0.15s;
+        }
+
+        .finding-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .finding-item.error-item { border-left: 2px solid var(--danger); }
+        .finding-item.warning-item { border-left: 2px solid var(--warning); }
+        .finding-item.info-item { border-left: 2px solid var(--info); }
+
+        .finding-prefix {
+            font-size: 10px;
+            font-weight: 700;
+        }
+
+        .finding-text {
+            font-size: 10.5px;
+            line-height: 1.3;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 24px 10px;
+            color: var(--text-muted);
+        }
+
+        .loading-state {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 6px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <!-- Tabs Header -->
+    <div class="tabs-header">
+        <button class="tab-btn active" id="tab-db-btn" onclick="switchTab('db')">🔌 Bases de Datos</button>
+        <button class="tab-btn" id="tab-audit-btn" onclick="switchTab('audit')">🛡️ Auditoría SQL</button>
+    </div>
+
+    <!-- Tab 1: Databases -->
+    <div class="tab-content active" id="tab-db">
+        <!-- Token Input Card -->
+        <div style="margin-bottom: 12px; padding: 10px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px;">
+            <div style="font-weight: 600; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                <span>Clave de Acceso (API Token)</span>
+                <span id="token-status" style="font-size: 9px; font-weight: 700; text-transform: uppercase;"></span>
+            </div>
+            <div style="display: flex; gap: 6px;">
+                <input type="password" id="input-token" placeholder="Ingresa tu API Key dhm_..." style="flex: 1; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border); color: var(--fg); padding: 4px 8px; border-radius: 3px; font-size: 11px; outline: none;">
+                <button class="action-btn" id="btn-save-token" style="padding: 4px 10px; font-size: 10px;">Guardar</button>
+            </div>
+        </div>
+
+        <div class="scan-action-bar">
+            <button class="action-btn" id="btn-refresh-dbs" style="width: 100%; padding: 6px; font-weight:600;">🔄 Sincronizar Bases de Datos</button>
+        </div>
+        <div id="db-loading" class="loading-state" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div>Consultando estado...</div>
+        </div>
+        <div class="card-list" id="db-list">
+            <!-- Populated dynamically -->
+        </div>
+    </div>
+
+    <!-- Tab 2: SQL Audit -->
+    <div class="tab-content" id="tab-audit">
+        <div class="scan-action-bar">
+            <button class="action-btn scan-btn" id="btn-scan-sql">🔍 Buscar Riesgos en Proyecto</button>
+        </div>
+        <div id="audit-loading" class="loading-state" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div>Auditando scripts SQL...</div>
+        </div>
+        <div class="card-list" id="audit-list">
+            <!-- Populated dynamically -->
+        </div>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            if (tab === 'db') {
+                document.getElementById('tab-db-btn').classList.add('active');
+                document.getElementById('tab-db').classList.add('active');
+                loadDbList();
+            } else {
+                document.getElementById('tab-audit-btn').classList.add('active');
+                document.getElementById('tab-audit').classList.add('active');
+                scanSqlFiles();
+            }
+        }
+
+        // --- Database Actions ---
+        function loadDbList() {
+            document.getElementById('db-loading').style.display = 'block';
+            document.getElementById('db-list').style.display = 'none';
+            vscode.postMessage({ command: 'getDbList' });
+        }
+
+        function renderDbList(datasources) {
+            document.getElementById('db-loading').style.display = 'none';
+            const listEl = document.getElementById('db-list');
+            listEl.style.display = 'flex';
+
+            if (!Array.isArray(datasources) || datasources.length === 0) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        No hay bases de datos registradas en el Monitor de Salud.
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = datasources.map(ds => {
+                let statusColor = 'var(--text-muted)';
+                let pulseClass = '';
+                const s = (ds.status || '').toUpperCase();
+                
+                if (s === 'OK') {
+                    statusColor = 'var(--success)';
+                    pulseClass = 'dot-pulse';
+                } else if (s === 'WARNING') {
+                    statusColor = 'var(--warning)';
+                    pulseClass = 'dot-pulse';
+                } else if (s === 'CRITICAL' || s === 'ERROR') {
+                    statusColor = 'var(--danger)';
+                    pulseClass = 'dot-pulse';
+                }
+
+                return `
+                    <div class="card">
+                        <div class="db-header">
+                            <div class="db-title">${ds.nombre}</div>
+                        </div>
+                        <div class="db-meta">${ds.tipo_db} • ${ds.host}</div>
+                        <div class="db-footer">
+                            <div class="status-indicator" style="color: ${statusColor}">
+                                <span class="status-dot ${pulseClass}"></span>
+                                <span>${ds.status || 'desconocido'}</span>
+                            </div>
+                            ${ds.activa ? `<button class="action-btn" onclick="openDashboard(${ds.id}, '${ds.nombre.replace(/'/g, "\\'")}')">Ver Dashboard</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openDashboard(id, name) {
+            vscode.postMessage({
+                command: 'viewDashboard',
+                dsId: id,
+                dsName: name
+            });
+        }
+
+        // --- SQL Scan Actions ---
+        function scanSqlFiles() {
+            document.getElementById('audit-loading').style.display = 'block';
+            document.getElementById('audit-list').style.display = 'none';
+            vscode.postMessage({ command: 'scanSqlFiles' });
+        }
+
+        function renderAuditList(files) {
+            document.getElementById('audit-loading').style.display = 'none';
+            const listEl = document.getElementById('audit-list');
+            listEl.style.display = 'flex';
+
+            const filteredFiles = files.filter(f => f.findings && f.findings.length > 0);
+
+            if (files.length === 0) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        No se encontraron archivos SQL/DDL en la carpeta del proyecto.
+                    </div>
+                `;
+                return;
+            }
+
+            if (filteredFiles.length === 0) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <span style="color: var(--success); font-size: 24px; display:block; margin-bottom:6px;">✔️</span>
+                        ¡Todos los archivos SQL están limpios de riesgos!
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = filteredFiles.map((file, fileIdx) => {
+                const errCount = file.findings.filter(f => f.severity === 'error').length;
+                const warnCount = file.findings.filter(f => f.severity === 'warning').length;
+                const infoCount = file.findings.filter(f => f.severity === 'info').length;
+
+                let badges = '';
+                if (errCount > 0) badges += `<span class="badge badge-danger">${errCount}</span>`;
+                if (warnCount > 0) badges += `<span class="badge badge-warning">${warnCount}</span>`;
+                if (infoCount > 0) badges += `<span class="badge badge-info">${infoCount}</span>`;
+
+                const findingsHtml = file.findings.map(f => {
+                    const icon = f.severity === 'error' ? '❌' : (f.severity === 'warning' ? '⚠️' : 'ℹ️');
+                    return `
+                        <div class="finding-item ${f.severity}-item" onclick="openFinding('${file.uriString}', ${f.line}, ${f.startChar}, ${f.endChar})">
+                            <span class="finding-prefix">${icon} L${f.line + 1}:</span>
+                            <span class="finding-text">${f.message}</span>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="card">
+                        <div class="file-card-header" onclick="openFile('${file.uriString}')">
+                            <div>
+                                <a class="file-name" href="#">${file.fileName}</a>
+                                <div class="file-path" title="${file.relativePath}">${file.relativePath}</div>
+                            </div>
+                            <div class="badge-list">
+                                ${badges}
+                            </div>
+                        </div>
+                        <div class="findings-list">
+                            ${findingsHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openFile(uriString) {
+            vscode.postMessage({
+                command: 'openFile',
+                uriString: uriString
+            });
+        }
+
+        function openFinding(uriString, line, startChar, endChar) {
+            vscode.postMessage({
+                command: 'openFinding',
+                uriString: uriString,
+                line: line,
+                startChar: startChar,
+                endChar: endChar
+            });
+        }
+
+        // --- Token Utilities ---
+        function updateTokenStatus(token) {
+            const statusEl = document.getElementById('token-status');
+            if (token && token.trim().startsWith('dhm_')) {
+                statusEl.textContent = 'Configurado';
+                statusEl.style.color = 'var(--success)';
+            } else {
+                statusEl.textContent = 'Falta Token';
+                statusEl.style.color = 'var(--warning)';
+            }
+        }
+
+        // --- Event Listeners ---
+        document.getElementById('btn-refresh-dbs').addEventListener('click', loadDbList);
+        document.getElementById('btn-scan-sql').addEventListener('click', scanSqlFiles);
+        document.getElementById('btn-save-token').addEventListener('click', () => {
+            const token = document.getElementById('input-token').value.trim();
+            vscode.postMessage({ command: 'saveToken', token: token });
+            updateTokenStatus(token);
+        });
+
+        // Request initial configuration
+        vscode.postMessage({ command: 'getConfig' });
+
+        window.addEventListener('message', event => {
+            const message = event.data;
+            switch (message.command) {
+                case 'configResult':
+                    const tokenInput = document.getElementById('input-token');
+                    if (tokenInput) {
+                        tokenInput.value = message.apiKey || '';
+                    }
+                    updateTokenStatus(message.apiKey);
+                    break;
+                case 'dbListResult':
+                    renderDbList(message.data);
+                    break;
+                case 'dbListError':
+                    document.getElementById('db-loading').style.display = 'none';
+                    document.getElementById('db-list').innerHTML = `
+                        <div class="empty-state" style="color:var(--danger)">
+                            <strong>Error de conexión</strong><br>
+                            ${message.message}<br><br>
+                            <span style="font-size:10px; color:var(--text-muted)">
+                                Asegúrate de configurar la URL del servidor y una API Key activa (DHM: Conectar al Servidor).
+                            </span>
+                        </div>
+                    `;
+                    break;
+                case 'scanSqlResult':
+                    renderAuditList(message.data);
+                    break;
+                case 'scanSqlError':
+                    document.getElementById('audit-loading').style.display = 'none';
+                    document.getElementById('audit-list').innerHTML = `<div class="empty-state" style="color:var(--danger)">Error: ${message.message}</div>`;
+                    break;
+                case 'refresh':
+                    // Refresh current active view
+                    if (document.getElementById('tab-db-btn').classList.contains('active')) {
+                        loadDbList();
+                    } else {
+                        scanSqlFiles();
+                    }
+                    break;
+            }
+        });
+
+        // Initial Load
+        loadDbList();
+    </script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+{
+  "name": "db-health-monitor",
+  "displayName": "Monitor de Salud DB",
+  "description": "Monitorea el estado, métricas y archivos de tus bases de datos directamente desde VS Code",
+  "version": "0.1.8",
+  "publisher": "Gerardo95",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gerardo/proyecto-si783-2026-i-u1-monitor_de_salud_espinoza_vargas.git"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "db-monitor-sidebar",
+          "title": "Monitor de Salud DB",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "db-monitor-sidebar": [
+        {
+          "type": "webview",
+          "id": "db-monitor-sidebar-webview",
+          "name": "Panel de Control"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "db-monitor.connect",
+        "title": "DHM: Conectar al Servidor",
+        "category": "Monitor de Salud"
+      },
+      {
+        "command": "db-monitor.refresh",
+        "title": "DHM: Actualizar Lista",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "db-monitor.viewDashboard",
+        "title": "Ver Dashboard",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "db-monitor.analyzeSql",
+        "title": "DHM: Analizar archivo SQL",
+        "category": "Monitor de Salud"
+      },
+      {
+        "command": "db-monitor.openAuditFile",
+        "title": "Abrir Archivo y Enfocar Línea"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "db-monitor.analyzeSql",
+          "when": "resourceLangId == sql",
+          "group": "modification"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "db-monitor.viewDashboard",
+          "when": "view == db-monitor-datasources && viewItem == datasource",
+          "group": "inline"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "db-monitor.refresh",
+          "when": "view == db-monitor-datasources",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Monitor de Salud DB",
+      "properties": {
+        "dbMonitor.serverUrl": {
+          "type": "string",
+          "default": "http://38.250.116.71:5000",
+          "description": "URL del servidor del Monitor de Salud DB (ej: http://38.250.116.71:5000)"
+        },
+        "dbMonitor.apiKey": {
+          "type": "string",
+          "default": "dhm_3eyflR0eRIeNYki820KNSMq7ufC1eiindPLJ57z1qOo",
+          "description": "API Key activa generada desde el panel web de Integraciones"
+        },
+        "dbMonitor.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Ruta al intérprete de Python (ej: python, python3, o la ruta de tu entorno virtual)"
+        }
+      }
+    }
+  }
+}
